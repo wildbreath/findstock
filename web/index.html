@@ -1,0 +1,157 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>股票筛选 · 条件选股 · 沪深A股自动筛选系统</title>
+  <link rel="stylesheet" href="/static/styles.css?v=__ASSET_VERSION__">
+  <link rel="stylesheet" href="/static/screen.css?v=__ASSET_VERSION__">
+</head>
+<body class="app-shell screen-page">
+  <aside class="app-sidebar">
+    <div class="sidebar-brand">
+      <span class="brand-mark">沪</span>
+      <span class="brand-text">沪深A股<br>自动筛选系统</span>
+    </div>
+    <nav class="side-nav" aria-label="主导航">
+      <a class="side-link" href="/"><span class="side-icon" aria-hidden="true">▦</span>总览</a>
+      <a class="side-link is-active" href="/screen" aria-current="page"><span class="side-icon" aria-hidden="true">▤</span>条件选股</a>
+      <a class="side-link" href="/stock-ladder"><span class="side-icon" aria-hidden="true">▥</span>连板天梯</a>
+      <a class="side-link" href="/review"><span class="side-icon" aria-hidden="true">▦</span>复盘表</a>
+      <a class="side-link" href="/watchlist"><span class="side-icon" aria-hidden="true">★</span>自选股</a>
+      <a class="side-link" href="/multi-chart"><span class="side-icon" aria-hidden="true">▦</span>多股同列</a>
+      <a class="side-link" href="/data"><span class="side-icon" aria-hidden="true">▦</span>数据</a>
+    </nav>
+  </aside>
+
+  <div class="app-main">
+    <header class="page-header">
+      <div class="wrap">
+        <h1>条件选股</h1>
+      </div>
+    </header>
+
+    <main class="wrap">
+    <nav class="screen-subnav" aria-label="条件选股子页面">
+      <a href="/screen/strategies">策略设计</a>
+      <a href="/screen/stocks" aria-current="page">股票筛选</a>
+    </nav>
+
+    <div id="alert-area" class="alert-area" aria-live="polite"></div>
+    <div id="sync-banner" class="notice" hidden>
+      <span id="sync-banner-text"></span>
+      <a href="/data">查看「数据」页面</a>
+    </div>
+
+    <section class="panel stock-strategy-panel" aria-labelledby="strategy-panel-title">
+      <div class="stock-strategy-head">
+        <h2 id="strategy-panel-title">策略 <span id="strategy-count"></span></h2>
+        <label class="strategy-search"><span>搜索</span><input id="strategy-search" type="search" placeholder="策略名称或条件" autocomplete="off"></label>
+      </div>
+      <div id="strategy-list" class="strategy-list" role="group" aria-label="选择策略"></div>
+    </section>
+
+    <section class="panel" aria-labelledby="screen-date-title">
+      <div class="controls-row">
+        <h2 id="screen-date-title" class="controls-title">筛选</h2>
+        <button id="screen-button" class="btn btn-primary" type="button">开始筛选</button>
+        <span class="criteria-badge" id="criteria-status" hidden></span>
+        <button id="export-button" class="btn" type="button" disabled>导出 CSV</button>
+        <span class="controls-sep"></span>
+        <input id="scan-month" type="month" class="month-input" aria-label="扫描月份">
+        <button id="scan-button" class="btn" type="button">扫描整月</button>
+      </div>
+
+      <div class="screen-grid">
+        <div class="calendar-block">
+          <div class="calendar-head">
+            <button id="calendar-prev" class="cal-nav" type="button" aria-label="上一个月">‹</button>
+            <button id="calendar-next" class="cal-nav" type="button" aria-label="下一个月">›</button>
+            <select id="calendar-year" class="cal-select" aria-label="选择年份"></select>
+            <select id="calendar-month" class="cal-select" aria-label="选择月份"></select>
+            <span class="calendar-hint" id="calendar-hint"></span>
+          </div>
+          <p class="calendar-selected">
+            基准日：<strong id="selected-date-label">—</strong>
+          </p>
+          <div class="calendar-weekdays" aria-hidden="true">
+            <span>一</span><span>二</span><span>三</span><span>四</span>
+            <span>五</span><span>六</span><span>日</span>
+          </div>
+          <div class="calendar-grid" id="calendar-grid" role="group" aria-label="交易日历"></div>
+          <div class="calendar-legend">
+            <span class="legend-item"><i class="dot dot-trading"></i>可选</span>
+            <span class="legend-item"><i class="dot dot-pending"></i>待下载</span>
+            <span class="legend-item"><i class="dot dot-closed"></i>休市</span>
+          </div>
+        </div>
+
+        <aside class="screen-run-summary" aria-label="本次筛选策略">
+          <div class="tuning-head"><h3>本次使用 <strong id="active-strategy-name"></strong></h3>
+            <span id="active-strategy-summary"></span>
+            <a id="edit-strategy" href="/screen/strategies">编辑条件</a>
+          </div>
+          <p class="condition-note">T0 是日历所选的筛选基准日；区间含首尾，前后日期均按交易日计算。临时参数切换后不保留。</p>
+          <fieldset id="criteria-fields" class="screen-strategy-fields" aria-label="本次筛选参数">
+          <div id="condition-list" class="condition-list"></div>
+          <p class="criteria-error" id="criteria-error" role="alert" hidden></p>
+          <div class="screen-tuning-actions">
+            <button id="criteria-reset" class="btn" type="button" title="恢复当前策略已保存的参数">恢复参数</button>
+            <button id="criteria-save" class="btn" type="button" title="将当前参数保存到此策略">保存参数</button>
+            <span id="criteria-dirty" role="status"></span>
+          </div>
+          </fieldset>
+        </aside>
+      </div>
+    </section>
+
+    <section class="panel" id="results-panel" hidden>
+      <div class="results-head">
+        <h3 id="results-title">符合条件的股票</h3>
+        <span class="badge" id="results-count">0</span>
+      </div>
+      <p class="table-note" id="scan-summary" hidden></p>
+      <div id="warnings" class="warnings"></div>
+      <div class="table-scroll">
+        <table id="results-table">
+          <thead>
+            <tr>
+              <th class="col-star">自选</th>
+              <th class="col-code">股票代码</th>
+              <th class="col-name">股票简称</th>
+              <th class="col-board">板块</th>
+              <th class="col-date">选出日 (T0)</th>
+            </tr>
+          </thead>
+          <tbody id="results-body"></tbody>
+        </table>
+      </div>
+    </section>
+    </main>
+
+  </div>
+
+  <script src="/static/shared.js?v=__ASSET_VERSION__"></script>
+  <script src="/static/chart.js?v=__ASSET_VERSION__"></script>
+  <script src="/static/conditions.js?v=__ASSET_VERSION__"></script>
+  <script src="/static/strategy-library.js?v=__ASSET_VERSION__"></script>
+  <script src="/static/screen.js?v=__ASSET_VERSION__"></script>
+  <script>
+    // 兜底检测: 若主脚本没能运行 (浏览器缓存错配、浏览器版本过旧、脚本被拦截),
+    // 页面会停在"日历空白、按钮没反应"的状态。这里主动给出可操作的提示。
+    window.setTimeout(function () {
+      if (window.__findstockBooted) return;
+      var message =
+        "页面脚本未能运行, 所以日历和按钮都不可用。" +
+        "请按 Ctrl+F5 (或 Ctrl+Shift+R) 强制刷新; " +
+        "若仍然无效, 请改用较新版本的 Chrome 或 Edge 打开本页面。";
+      var area = document.getElementById("alert-area");
+      if (area) {
+        area.innerHTML = '<div class="alert alert-error">' + message + "</div>";
+      } else {
+        window.alert(message);
+      }
+    }, 3000);
+  </script>
+</body>
+</html>

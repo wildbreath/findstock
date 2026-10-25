@@ -1,0 +1,111 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>连板天梯 · 沪深A股自动筛选系统</title>
+  <link rel="stylesheet" href="/static/styles.css?v=__ASSET_VERSION__">
+  <link rel="stylesheet" href="/static/ladder.css?v=__ASSET_VERSION__">
+</head>
+<body class="app-shell ladder-page">
+  <aside class="app-sidebar">
+    <div class="sidebar-brand">
+      <span class="brand-mark">沪</span>
+      <span class="brand-text">沪深A股<br>自动筛选系统</span>
+    </div>
+    <nav class="side-nav" aria-label="主导航">
+      <a class="side-link" href="/"><span class="side-icon" aria-hidden="true">▦</span>总览</a>
+      <a class="side-link" href="/screen"><span class="side-icon" aria-hidden="true">▤</span>条件选股</a>
+      <a class="side-link is-active" href="/stock-ladder" aria-current="page"><span class="side-icon" aria-hidden="true">▥</span>连板天梯</a>
+      <a class="side-link" href="/review"><span class="side-icon" aria-hidden="true">▦</span>复盘表</a>
+      <a class="side-link" href="/watchlist"><span class="side-icon" aria-hidden="true">★</span>自选股</a>
+      <a class="side-link" href="/multi-chart"><span class="side-icon" aria-hidden="true">▦</span>多股同列</a>
+      <a class="side-link" href="/data"><span class="side-icon" aria-hidden="true">▦</span>数据</a>
+    </nav>
+    <p class="sidebar-foot">涨停池: 东方财富 / 同花顺<br>沪深 A 股 · 按交易日复盘</p>
+  </aside>
+  <div class="app-main">
+    <header class="page-header">
+      <div class="wrap ladder-heading">
+        <div>
+          <p class="ladder-eyebrow">涨停复盘 / MARKET LADDER</p>
+          <h1>连板天梯</h1>
+          <p class="subtitle">多日并排对照，按连板高度查看涨停梯队。</p>
+        </div>
+        <span class="ladder-source">本地存档 · 涨停题材来自悟道</span>
+      </div>
+    </header>
+    <main class="wrap ladder-main">
+      <div id="alert-area" class="alert-area" aria-live="polite"></div>
+      <section class="panel ladder-toolbar" aria-label="交易日期与刷新">
+        <div class="ladder-date-controls">
+          <label for="ladder-count" title="100% 缩放时的日期列数，缩小后可显示更多日期">基准日期</label>
+          <select id="ladder-count"><option value="3">3 个交易日</option><option value="5" selected>5 个交易日</option><option value="10">10 个交易日</option></select>
+          <label for="ladder-zoom">天梯缩放</label>
+          <select id="ladder-zoom" title="同时缩放日期列、股票卡片和连板层级"><option value="50">50%</option><option value="60">60%</option><option value="70">70%</option><option value="80">80%</option><option value="90">90%</option><option value="100" selected>100%</option><option value="125">125%</option><option value="150">150%</option></select>
+          <label for="ladder-date">定位日期</label>
+          <select id="ladder-date" disabled aria-label="交易日"><option>读取交易日…</option></select>
+          <button id="ladder-latest" class="btn" type="button" disabled>最新交易日</button>
+        </div>
+        <div class="ladder-refresh-controls">
+          <a class="btn multi-entry" href="/multi-chart?source=ladder">选择股票同列</a>
+          <label class="ladder-check" title="仅北京时间09:15—11:30、13:00—15:00，且当天在本地交易日历中"><input id="ladder-auto" type="checkbox">盘中当天每 60 秒刷新</label>
+          <button id="ladder-refresh" class="btn btn-primary" type="button">刷新本地数据</button>
+        </div>
+      </section>
+      <details class="panel ladder-theme-manager">
+        <summary>悟道题材数据 <span>本地存档与批量下载</span></summary>
+        <div class="ladder-theme-manager-body">
+          <p>悟道题材只在收盘后批量下载，北京时间15:30后准备。已存主类在盘中也只读本地；浏览、筛选和刷新不调用悟道。下载按日期批量获取，每页尽量取满100条；额度用完后保留进度，下次继续。</p>
+          <form id="ladder-theme-config" class="ladder-theme-controls">
+            <label for="ladder-theme-key">悟道 API Key</label>
+            <input id="ladder-theme-key" type="password" autocomplete="off" spellcheck="false" placeholder="输入密钥后仅保存到本地" aria-describedby="ladder-theme-key-help" required>
+            <button id="ladder-theme-save" class="btn" type="submit">保存密钥</button>
+          </form>
+          <p id="ladder-theme-key-help">密钥不会显示在页面或存入浏览器。尚未申请时，可前往<a href="https://stock.quicktiny.cn/developer" target="_blank" rel="noopener noreferrer">悟道开发者控制台</a>获取。</p>
+          <div class="ladder-theme-controls">
+            <label for="ladder-theme-budget">本次最多调用</label>
+            <input id="ladder-theme-budget" type="number" value="50" min="1" max="50" step="1" inputmode="numeric">
+            <button id="ladder-theme-download" class="btn btn-primary" type="button" disabled>下载全部缺失题材</button>
+            <button id="ladder-theme-status-refresh" class="btn" type="button">检查进度</button>
+          </div>
+          <p id="ladder-theme-download-status" role="status" aria-live="polite">正在读取本地题材进度…</p>
+          <p>免费账户每日 50 次；本机计数不包含同一账号在其他客户端的使用。达到额度或下载失败会暂停，已保存的数据仍可离线查看。</p>
+        </div>
+      </details>
+      <section class="panel ladder-content" aria-labelledby="ladder-title">
+        <div class="panel-head ladder-content-head">
+          <div><h2 id="ladder-title">多日涨停梯队</h2><p id="ladder-status" role="status">正在连接数据源…</p></div>
+          <div class="ladder-paging">
+            <button id="ladder-next" class="btn" type="button" disabled>‹ 较新日期</button>
+            <button id="ladder-prev" class="btn" type="button" disabled>更早日期 ›</button>
+          </div>
+        </div>
+        <div class="ladder-filters">
+          <label>上市板块<select id="ladder-board"><option value="all">全部沪深 A 股</option><option value="main">沪深主板</option><option value="gem">创业板</option><option value="star">科创板</option></select></label>
+          <label>题材日期<select id="ladder-theme-date" aria-describedby="ladder-theme-status" disabled><option value="">读取交易日…</option></select></label>
+          <label class="ladder-theme-select">悟道涨停题材<select id="ladder-theme" aria-describedby="ladder-theme-status" disabled><option value="all">全部涨停题材</option></select></label>
+          <label class="ladder-search">搜索股票<input id="ladder-search" type="search" placeholder="名称、代码或当日涨停题材" maxlength="60"></label>
+          <label>同梯队排序<select id="ladder-sort"><option value="time">首次封板时间</option><option value="funds">封板资金从高到低</option><option value="turnover">换手率从高到低</option></select></label>
+          <label class="ladder-check"><input id="ladder-exclude-st" type="checkbox" checked>排除 ST</label>
+          <label class="ladder-check"><input id="ladder-multi" type="checkbox">只看连板</label>
+          <label class="ladder-check" title="隐藏当前可见日期没有股票的层级，拖动时间条时实时调整行高"><input id="ladder-compact" type="checkbox" checked>压缩空白</label>
+        </div>
+        <div class="ladder-theme-feedback"><span id="ladder-theme-status" role="status">正在读取本地悟道题材统计…</span><button id="ladder-theme-retry" class="btn" type="button" hidden>重读题材统计</button><button id="ladder-watch-add" class="btn" type="button">按日期和题材加入自选</button></div>
+        <div id="ladder-groups" class="ladder-grid-scroll" role="region" aria-label="多日连板对照表，可横向滚动" aria-describedby="ladder-scroll-hint" tabindex="0" aria-busy="true"><p class="ladder-empty"><span class="loading"></span> 正在读取涨停股池…</p></div>
+        <p class="table-note ladder-footnote">卡片显示悟道给出的当日涨停主类，同一股票在不同日期可以属于不同题材；悟道只在收盘后下载，盘中主类也从本地读取。先指定「题材日期」，再选择该日涨停题材，括号为该日股票数；所有日期继续展示，只保留各日属于所选题材的股票，其他股票隐藏。拖动天梯不会改变题材日期，可叠加「只看连板」等条件。存档未齐时筛选可能不全。收盘及历史浏览只读本地，缺少涨停池或日K时先在<a href="/data">数据页面</a>补齐。点击股票查看完整 K 线。</p>
+      </section>
+      <p class="ladder-disclaimer">收盘后及历史日期的天梯、交易日历、题材和K线全部读取本地存档；「刷新本地数据」不会补抓缺失历史数据，请到<a href="/data">数据页面</a>下载。仅盘中当天原涨停池可在交易时段实时更新并保存，其他日期始终读本地；悟道主类始终读本地，只在收盘后批量下载，北京时间15:30后准备。原涨停池来自<a href="https://quote.eastmoney.com/ztb/detail#type=ztgc" target="_blank" rel="noopener noreferrer">东方财富</a>或<a href="https://data.10jqka.com.cn/limit_up/" target="_blank" rel="noopener noreferrer">同花顺</a>，连板统计口径可能有差异。已存档日期长期保留。</p>
+    </main>
+    <div id="ladder-sticky-head" class="ladder-sticky-head" aria-hidden="true" hidden></div>
+    <div id="ladder-scroll-dock" class="ladder-scroll-dock" hidden>
+      <div class="ladder-scroll-caption"><span>← 较新日期</span><span id="ladder-scroll-hint">拖动底部滚动条浏览日期</span><span>更早日期 →</span></div>
+      <div id="ladder-scrollbar" class="ladder-scrollbar" tabindex="0" role="region" aria-label="日期横向滚动条，左右方向键移动，Home 和 End 跳到两端" aria-controls="ladder-groups"><div id="ladder-scrollbar-space"></div></div>
+    </div>
+  </div>
+  <script src="/static/shared.js?v=__ASSET_VERSION__"></script>
+  <script src="/static/chart.js?v=__ASSET_VERSION__"></script>
+  <script src="/static/ladder-watchlist.js?v=__ASSET_VERSION__"></script>
+  <script src="/static/ladder.js?v=__ASSET_VERSION__"></script>
+</body>
+</html>

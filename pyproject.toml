@@ -1,0 +1,43 @@
+[project]
+name = "findstock"
+version = "1.0.0"
+description = "沪深A股自动筛选系统 —— 按所选交易日筛选连续两次成交量翻倍且三日温和上涨的股票"
+requires-python = ">=3.11"
+dependencies = [
+    "akshare==1.17.94",
+    "fastapi==0.141.1",
+    "uvicorn[standard]==0.53.0",
+    "pydantic==2.13.5",
+]
+
+[project.optional-dependencies]
+dev = ["pytest==9.1.1", "httpx==0.28.1"]
+
+[tool.setuptools.packages.find]
+include = ["app*", "scripts*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q"
+filterwarnings = [
+    "ignore::DeprecationWarning:starlette.*",
+    "ignore::DeprecationWarning:fastapi.*",
+]
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "UP", "B", "SIM", "C4", "RET", "ARG", "PTH", "PERF", "N"]
+ignore = [
+    "B008",   # FastAPI 的 Depends/Query 必须写在参数默认值里
+    "UP042",  # 显式继承 str + Enum, 避免 StrEnum 改变 str() 语义
+]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/*" = [
+    "ARG001",  # pytest 夹具以参数形式注入, 未必在函数体内直接使用
+    "ARG002",
+    "ARG005",  # 测试里的 lambda 常用来忽略签名中的参数
+]

@@ -1,0 +1,97 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>数据管理 · 沪深A股自动筛选系统</title>
+  <link rel="stylesheet" href="/static/styles.css?v=__ASSET_VERSION__">
+</head>
+<body class="app-shell">
+  <aside class="app-sidebar">
+    <div class="sidebar-brand">
+      <span class="brand-mark">沪</span>
+      <span class="brand-text">沪深A股<br>自动筛选系统</span>
+    </div>
+    <nav class="side-nav" aria-label="主导航">
+      <a class="side-link" href="/"><span class="side-icon" aria-hidden="true">▦</span>总览</a>
+      <a class="side-link" href="/screen"><span class="side-icon" aria-hidden="true">▤</span>条件选股</a>
+      <a class="side-link" href="/stock-ladder"><span class="side-icon" aria-hidden="true">▥</span>连板天梯</a>
+      <a class="side-link" href="/review"><span class="side-icon" aria-hidden="true">▦</span>复盘表</a>
+      <a class="side-link" href="/watchlist"><span class="side-icon" aria-hidden="true">★</span>自选股</a>
+      <a class="side-link" href="/multi-chart"><span class="side-icon" aria-hidden="true">▦</span>多股同列</a>
+      <a class="side-link is-active" href="/data" aria-current="page"><span class="side-icon" aria-hidden="true">▦</span>数据</a>
+    </nav>
+    <p class="sidebar-foot">
+      数据来源: akshare (新浪 / 腾讯)<br>本地 SQLite 缓存 · 交易日历判定
+    </p>
+  </aside>
+
+  <div class="app-main">
+    <header class="page-header">
+      <div class="wrap">
+        <h1>数据管理</h1>
+        <p class="subtitle">
+          下载并维护本地行情数据: 交易日历、股票基础信息与日线行情都会缓存到本地 SQLite,
+          选股页面只读取本地数据, 因此不联网也能筛选。
+        </p>
+      </div>
+    </header>
+
+    <main class="wrap">
+    <div id="alert-area" class="alert-area" aria-live="polite"></div>
+
+    <section class="panel">
+      <div class="panel-head">
+        <h2>本地数据</h2>
+        <p id="coverage-text">正在读取本地数据覆盖情况…</p>
+      </div>
+
+      <div class="controls-row">
+        <button id="init-button" class="btn btn-primary" type="button">初始化 (下载最近两年)</button>
+        <button id="update-button" class="btn" type="button">增量补充新交易日</button>
+        <button id="cancel-button" class="btn btn-danger" type="button" hidden>取消任务</button>
+      </div>
+
+      <div class="progress" id="progress" hidden>
+        <div class="progress-track"><div class="progress-fill" id="progress-fill"></div></div>
+        <p class="progress-text" id="progress-text"></p>
+      </div>
+
+      <p class="table-note">
+        首次使用请点 <strong>初始化 (下载最近两年)</strong>; 之后每个交易日收盘后点
+        <strong>增量补充新交易日</strong> 即可。下载过程中可以随时取消, 已完成的部分不会重复下载。
+        更新时也会补充对应交易日的连板天梯并存到本地, 无需打开天梯页面。
+        天梯暂未补齐的日期会单独提示, 下次更新时自动重试。
+        数据下载期间可以切到 <a href="/screen">条件选股页面</a> 查看, 但新交易日要等下载完成后才能筛选。
+      </p>
+    </section>
+    </main>
+
+    <footer class="app-footer">
+      <div class="wrap">
+        <span>数据来源: akshare (新浪 / 腾讯) · 本地 SQLite 缓存 · 交易日历判定</span>
+      </div>
+    </footer>
+  </div>
+
+  <script src="/static/shared.js?v=__ASSET_VERSION__"></script>
+  <script src="/static/data.js?v=__ASSET_VERSION__"></script>
+  <script>
+    // 兜底检测: 若页面脚本没能运行 (浏览器缓存错配、浏览器版本过旧、脚本被拦截),
+    // 页面会停在 "按钮没反应" 的状态。这里主动给出可操作的提示。
+    window.setTimeout(function () {
+      if (window.__findstockBooted) return;
+      var message =
+        "页面脚本未能运行, 所以本页的按钮都不可用。" +
+        "请按 Ctrl+F5 (或 Ctrl+Shift+R) 强制刷新; " +
+        "若仍然无效, 请改用较新版本的 Chrome 或 Edge 打开本页面。";
+      var area = document.getElementById("alert-area");
+      if (area) {
+        area.innerHTML = '<div class="alert alert-error">' + message + "</div>";
+      } else {
+        window.alert(message);
+      }
+    }, 3000);
+  </script>
+</body>
+</html>

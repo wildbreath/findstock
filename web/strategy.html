@@ -1,0 +1,120 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>策略设计 · 条件选股 · 沪深A股自动筛选系统</title>
+  <link rel="stylesheet" href="/static/styles.css?v=__ASSET_VERSION__">
+  <link rel="stylesheet" href="/static/screen.css?v=__ASSET_VERSION__">
+</head>
+<body class="app-shell screen-page">
+  <aside class="app-sidebar">
+    <div class="sidebar-brand">
+      <span class="brand-mark">沪</span>
+      <span class="brand-text">沪深A股<br>自动筛选系统</span>
+    </div>
+    <nav class="side-nav" aria-label="主导航">
+      <a class="side-link" href="/"><span class="side-icon" aria-hidden="true">▦</span>总览</a>
+      <a class="side-link is-active" href="/screen" aria-current="page"><span class="side-icon" aria-hidden="true">▤</span>条件选股</a>
+      <a class="side-link" href="/stock-ladder"><span class="side-icon" aria-hidden="true">▥</span>连板天梯</a>
+      <a class="side-link" href="/review"><span class="side-icon" aria-hidden="true">▦</span>复盘表</a>
+      <a class="side-link" href="/watchlist"><span class="side-icon" aria-hidden="true">★</span>自选股</a>
+      <a class="side-link" href="/multi-chart"><span class="side-icon" aria-hidden="true">▦</span>多股同列</a>
+      <a class="side-link" href="/data"><span class="side-icon" aria-hidden="true">▦</span>数据</a>
+    </nav>
+  </aside>
+
+  <div class="app-main">
+    <header class="page-header">
+      <div class="wrap">
+        <h1>条件选股</h1>
+      </div>
+    </header>
+
+    <main class="wrap">
+    <nav class="screen-subnav" aria-label="条件选股子页面">
+      <a href="/screen/strategies" aria-current="page">策略设计</a>
+      <a href="/screen/stocks">股票筛选</a>
+    </nav>
+
+    <div id="alert-area" class="alert-area" aria-live="polite"></div>
+
+    <section class="panel strategy-panel" aria-label="策略设计">
+      <fieldset id="strategy-fields" class="screen-strategy-fields" aria-label="编辑选股策略" disabled>
+        <div class="strategy-workspace">
+          <aside class="strategy-library" aria-label="我的策略">
+            <div class="strategy-library-head"><h3>我的策略 <span id="strategy-count"></span></h3>
+              <button id="strategy-new" class="btn btn-mini" type="button">＋ 新建</button>
+            </div>
+            <label class="strategy-search"><span>搜索</span><input id="strategy-search" type="search" placeholder="策略名称或条件" autocomplete="off"></label>
+            <div id="strategy-list" class="strategy-list" role="group" aria-label="选择策略"></div>
+            <details id="strategy-guide" class="strategy-guide" open>
+              <summary>筛选条件说明</summary>
+              <dl id="strategy-guide-list"></dl>
+              <p>上下限留空表示不限制。</p>
+            </details>
+          </aside>
+          <div class="strategy-editor">
+            <div class="strategy-editor-head">
+              <label class="strategy-name-field"><span>策略名称</span>
+                <input id="strategy-name" type="text" maxlength="30" autocomplete="off" placeholder="给策略起个名字">
+              </label>
+              <div class="strategy-head-actions">
+                <button id="strategy-save" class="btn btn-primary" type="button">保存修改</button>
+                <button id="strategy-save-as" class="btn" type="button">复制策略</button>
+                <a id="use-strategy" class="btn btn-primary" href="/screen/stocks">去筛选 →</a>
+              </div>
+            </div>
+            <div class="strategy-condition-head"><h3>条件 · 全部满足 <span id="condition-count"></span></h3><span id="strategy-dirty" role="status"></span></div>
+            <p class="condition-note">T0 是筛选基准日，前后日期均按交易日计算。多日区间包含开始日和结束日。</p>
+            <div id="condition-list" class="condition-list"></div>
+            <details id="condition-picker" class="condition-picker" open>
+              <summary>＋ 添加筛选条件</summary>
+              <div id="condition-palette" class="condition-palette"></div>
+            </details>
+            <p class="criteria-error" id="criteria-error" role="alert" hidden></p>
+            <div class="criteria-actions strategy-secondary-actions">
+              <button id="criteria-reset" class="btn btn-mini" type="button" title="撤销当前未保存的名称和参数修改">撤销修改</button>
+              <button id="strategy-delete" class="btn btn-danger btn-mini" type="button">删除策略</button>
+            </div>
+          </div>
+        </div>
+      </fieldset>
+    </section>
+
+    <section class="panel strategy-map-panel" aria-labelledby="strategy-map-title">
+      <div class="strategy-map-head"><h2 id="strategy-map-title">整体策略形态</h2><span>全部条件联合示意 · 非真实行情</span></div>
+      <p class="condition-note">整套策略使用同一组 K 线和量柱。点选条件可查看图内标注；窄屏可横向滑动。</p>
+      <div id="strategy-map" aria-label="策略在交易日 K 线上的映射"></div>
+      <p id="strategy-map-detail" class="strategy-map-detail" role="status"></p>
+    </section>
+
+    </main>
+
+  </div>
+
+  <script src="/static/shared.js?v=__ASSET_VERSION__"></script>
+  <script src="/static/conditions.js?v=__ASSET_VERSION__"></script>
+  <script src="/static/strategy-library.js?v=__ASSET_VERSION__"></script>
+  <script src="/static/chart.js?v=__ASSET_VERSION__"></script>
+  <script src="/static/strategy-map.js?v=__ASSET_VERSION__"></script>
+  <script src="/static/strategy.js?v=__ASSET_VERSION__"></script>
+  <script>
+    // 兜底检测: 若主脚本没能运行 (浏览器缓存错配、浏览器版本过旧、脚本被拦截),
+    // 页面会停在"日历空白、按钮没反应"的状态。这里主动给出可操作的提示。
+    window.setTimeout(function () {
+      if (window.__findstockBooted) return;
+      var message =
+        "页面脚本未能运行, 所以策略编辑器不可用。" +
+        "请按 Ctrl+F5 (或 Ctrl+Shift+R) 强制刷新; " +
+        "若仍然无效, 请改用较新版本的 Chrome 或 Edge 打开本页面。";
+      var area = document.getElementById("alert-area");
+      if (area) {
+        area.innerHTML = '<div class="alert alert-error">' + message + "</div>";
+      } else {
+        window.alert(message);
+      }
+    }, 3000);
+  </script>
+</body>
+</html>

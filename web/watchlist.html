@@ -1,0 +1,127 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>自选股 · 沪深A股自动筛选系统</title>
+  <link rel="stylesheet" href="/static/styles.css?v=__ASSET_VERSION__">
+</head>
+<body class="app-shell watchlist-page">
+  <aside class="app-sidebar">
+    <div class="sidebar-brand">
+      <span class="brand-mark">沪</span>
+      <span class="brand-text">沪深A股<br>自动筛选系统</span>
+    </div>
+    <nav class="side-nav" aria-label="主导航">
+      <a class="side-link" href="/"><span class="side-icon" aria-hidden="true">▦</span>总览</a>
+      <a class="side-link" href="/screen"><span class="side-icon" aria-hidden="true">▤</span>条件选股</a>
+      <a class="side-link" href="/stock-ladder"><span class="side-icon" aria-hidden="true">▥</span>连板天梯</a>
+      <a class="side-link" href="/review"><span class="side-icon" aria-hidden="true">▦</span>复盘表</a>
+      <a class="side-link is-active" href="/watchlist" aria-current="page"><span class="side-icon" aria-hidden="true">★</span>自选股</a>
+      <a class="side-link" href="/multi-chart"><span class="side-icon" aria-hidden="true">▦</span>多股同列</a>
+      <a class="side-link" href="/data"><span class="side-icon" aria-hidden="true">▦</span>数据</a>
+    </nav>
+    <p class="sidebar-foot">
+      数据来源: akshare (新浪 / 腾讯)<br>本地 SQLite 缓存 · 交易日历判定
+    </p>
+  </aside>
+
+  <div class="app-main">
+    <header class="page-header">
+      <div class="wrap">
+        <h1>自选股</h1>
+        <p class="subtitle">
+          按分类整理关注的股票，记录观察思路。点击股票或 K 线缩略图查看行情。
+        </p>
+      </div>
+    </header>
+
+    <main class="wrap">
+    <div id="alert-area" class="alert-area" aria-live="polite"></div>
+
+    <section class="panel watchlist-workspace">
+      <aside class="category-panel" aria-label="自选股分类">
+        <div class="category-panel-head">
+          <h2>我的分类</h2>
+          <button id="category-manage" class="btn btn-mini" type="button" aria-pressed="false">管理</button>
+        </div>
+        <nav class="category-chips" id="category-chips" aria-label="按分类查看"></nav>
+        <form class="category-create" id="category-create-form" autocomplete="off">
+          <label for="category-name">新建分类</label>
+          <div class="category-create-row">
+            <input id="category-name" type="text" maxlength="20" required placeholder="例如：低吸、突破">
+            <button class="btn" type="submit">创建</button>
+          </div>
+        </form>
+        <p class="category-help">一只股票可加入多个分类。<br>删除分类会保留其中的股票。</p>
+      </aside>
+
+      <div class="watchlist-content">
+        <div class="panel-head watchlist-head">
+          <div>
+            <h2 id="watchlist-title" tabindex="-1">全部自选</h2>
+            <p id="watchlist-summary" role="status">正在读取…</p>
+          </div>
+          <div class="watchlist-actions">
+          <label class="watchlist-zoom" for="watchlist-zoom">卡片缩放
+            <select id="watchlist-zoom" title="缩放股票卡片和间距，缩小后同屏可展示更多股票">
+              <option value="50">50%</option><option value="60">60%</option><option value="70">70%</option><option value="80">80%</option><option value="90">90%</option><option value="100" selected>100%</option><option value="125">125%</option><option value="150">150%</option>
+            </select>
+          </label>
+          <a class="btn multi-entry" href="/multi-chart?source=watchlist">选择股票同列</a>
+          <button id="watchlist-refresh" class="btn" type="button">刷新</button>
+          </div>
+        </div>
+
+        <div class="watchlist-toolbar">
+          <label for="watchlist-search">全市场搜索</label>
+          <div class="watch-search-field">
+            <input id="watchlist-search" type="search" maxlength="80" placeholder="输入股票名称或代码，直接加入自选" autocomplete="off"
+              aria-controls="watchlist-search-results" aria-describedby="watchlist-search-hint">
+            <div id="watchlist-search-results" class="watch-search-results" aria-label="全市场搜索结果" hidden></div>
+          </div>
+        </div>
+        <p id="watchlist-search-hint" class="watchlist-hint">搜索覆盖全市场股票名录。按住蓝色「拖动」柄调整顺序，绿色标记提示插入位置，松开保存；Esc 取消，也可使用上移、下移按钮。</p>
+
+        <div class="watchlist-empty" id="watchlist-empty" hidden></div>
+
+        <div class="watchlist-list" id="watchlist-list"></div>
+
+        <p class="table-note">
+          "最新交易日 / 最新收盘 / 涨跌幅" 取自本地日线缓存, 想更新到最新交易日请到
+          <a href="/data">数据页面</a> 执行增量补充。备注在输入框失焦时自动保存
+          (也可按 Ctrl+Enter 立即保存)。选中观察思路中的文字后点击「高亮」突出重点。排序在各分类间共用。
+        </p>
+      </div>
+    </section>
+    </main>
+
+    <footer class="app-footer">
+      <div class="wrap">
+        <span>数据来源: akshare (新浪 / 腾讯) · 本地 SQLite 缓存 · 交易日历判定</span>
+      </div>
+    </footer>
+  </div>
+
+  <script src="/static/shared.js?v=__ASSET_VERSION__"></script>
+  <script src="/static/chart.js?v=__ASSET_VERSION__"></script>
+  <script src="/static/watchlist-charts.js?v=__ASSET_VERSION__"></script>
+  <script src="/static/watchlist.js?v=__ASSET_VERSION__"></script>
+  <script>
+    // 兜底检测: 页面脚本没能运行时给出可操作提示, 而不是停在空页面。
+    window.setTimeout(function () {
+      if (window.__findstockBooted) return;
+      var message =
+        "页面脚本未能运行, 所以自选股清单和 K 线图都用不了。" +
+        "请按 Ctrl+F5 (或 Ctrl+Shift+R) 强制刷新; " +
+        "若仍然无效, 请改用较新版本的 Chrome 或 Edge 打开本页面。";
+      var area = document.getElementById("alert-area");
+      if (area) {
+        area.innerHTML = '<div class="alert alert-error">' + message + "</div>";
+      } else {
+        window.alert(message);
+      }
+    }, 3000);
+  </script>
+</body>
+</html>

@@ -1,0 +1,84 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>多股同列 · 沪深A股自动筛选系统</title>
+  <link rel="stylesheet" href="/static/styles.css?v=__ASSET_VERSION__">
+  <link rel="stylesheet" href="/static/multi-chart.css?v=__ASSET_VERSION__">
+</head>
+<body class="app-shell multi-page">
+  <aside class="app-sidebar">
+    <div class="sidebar-brand"><span class="brand-mark">沪</span><span class="brand-text">沪深A股<br>自动筛选系统</span></div>
+    <nav class="side-nav" aria-label="主导航">
+      <a class="side-link" href="/"><span class="side-icon" aria-hidden="true">▦</span>总览</a>
+      <a class="side-link" href="/screen"><span class="side-icon" aria-hidden="true">▤</span>条件选股</a>
+      <a class="side-link" href="/stock-ladder"><span class="side-icon" aria-hidden="true">▥</span>连板天梯</a>
+      <a class="side-link" href="/review"><span class="side-icon" aria-hidden="true">▦</span>复盘表</a>
+      <a class="side-link" href="/watchlist"><span class="side-icon" aria-hidden="true">★</span>自选股</a>
+      <a class="side-link is-active" href="/multi-chart" aria-current="page"><span class="side-icon" aria-hidden="true">▦</span>多股同列</a>
+      <a class="side-link" href="/data"><span class="side-icon" aria-hidden="true">▦</span>数据</a>
+    </nav>
+    <p class="sidebar-foot">日线行情 · 本地缓存<br>多股并排 · 独立操作与标记</p>
+  </aside>
+  <div class="app-main">
+    <header class="page-header"><div class="wrap">
+      <h1>多股同列</h1>
+      <p class="subtitle">混选自选股与连板天梯股票。每张 K 线可独立缩放、查看日期，标记 T0、T1、T2 节点。</p>
+    </div></header>
+    <main class="wrap">
+      <div id="alert-area" class="alert-area" aria-live="polite"></div>
+      <section class="panel multi-toolbar" aria-label="图表设置与股票选择">
+        <div class="multi-toolbar-head">
+          <div><h2>走势对照 <span id="multi-count" class="multi-count">0 / 12</span></h2><p id="multi-range" role="status">正在读取本地交易日…</p></div>
+          <div class="multi-actions">
+            <button class="btn btn-primary" type="button" data-source="watchlist">从自选股添加</button>
+            <button class="btn" type="button" data-source="ladder">从连板天梯添加</button>
+          </div>
+        </div>
+        <div class="multi-settings">
+          <label for="multi-period">统一重置区间</label>
+          <select id="multi-period"><option value="60" selected>近 60 个交易日</option><option value="120">近 120 个交易日</option><option value="250">近 250 个交易日</option></select>
+          <label for="multi-columns">排列</label>
+          <select id="multi-columns"><option value="2" selected>每行 2 只</option><option value="3">每行 3 只</option></select>
+          <button id="multi-refresh" class="btn" type="button">刷新行情</button>
+          <span class="multi-legend"><span class="ma5">MA5</span><span class="ma10">MA10</span><span class="ma20">MA20</span><span class="ma60">MA60</span></span>
+        </div>
+      </section>
+      <p id="multi-loading" class="table-note" role="status"></p>
+      <section id="multi-grid" class="multi-grid" aria-label="股票走势对照"></section>
+      <div id="multi-empty" class="panel multi-empty" hidden>
+        <span class="multi-empty-mark" aria-hidden="true">▥</span>
+        <h2>选几只股票，一起看走势</h2>
+        <p>可从自选分类或指定交易日的连板天梯中选择，最多同时展示 12 只。</p>
+        <div class="multi-actions"><button class="btn btn-primary" type="button" data-source="watchlist">选择自选股</button><button class="btn" type="button" data-source="ladder">选择天梯股票</button></div>
+      </div>
+      <p class="table-note">滚轮缩放，横向拖动平移，点击固定光标；每只股票独立操作。开启「标记节点」后点击 K 线，依次添加 T0、T1、T2…，点击节点日期可跳回，× 删除单个节点。图表聚焦后可用方向键查看日期、加减号缩放、Enter 固定或标记。停牌、上市前或缺失行情的日期留空，红涨绿跌按开收盘判断。节点保存在当前浏览器，行情更新请到<a href="/data">数据页面</a>。</p>
+    </main>
+  </div>
+  <dialog id="multi-picker" class="multi-picker" aria-labelledby="multi-picker-title">
+    <form id="multi-picker-form">
+      <div class="multi-picker-head"><div><h2 id="multi-picker-title">选择对照股票</h2><p>可混合两个来源，重复股票只占一个位置。</p></div><button class="btn" type="button" data-picker-cancel>取消</button></div>
+      <div class="multi-source-tabs" role="group" aria-label="股票来源">
+        <button class="btn" type="button" data-picker-source="watchlist" aria-pressed="true">自选股</button>
+        <button class="btn" type="button" data-picker-source="ladder" aria-pressed="false">连板天梯</button>
+      </div>
+      <div class="multi-picker-filters">
+        <label id="multi-category-field">自选分类<select id="multi-category"><option value="all">全部自选</option></select></label>
+        <label id="multi-date-field" hidden>天梯交易日<select id="multi-date"></select></label>
+        <label class="multi-picker-search">查找股票<input id="multi-search" type="search" placeholder="名称或代码" autocomplete="off"></label>
+      </div>
+      <p id="multi-source-status" class="table-note" role="status"></p>
+      <button id="multi-source-retry" class="btn" type="button" hidden>重新读取来源</button>
+      <div class="multi-pick-tools"><button id="multi-select-visible" class="btn" type="button">选择当前列表</button><button id="multi-clear-draft" class="btn" type="button">清空选择</button></div>
+      <div id="multi-options" class="multi-options"></div>
+      <p id="multi-picker-error" class="picker-error" role="alert" hidden></p>
+      <div class="multi-picker-foot"><span id="multi-picked-count" role="status">已选 0 / 12</span><button class="btn btn-primary" type="submit">显示所选股票</button></div>
+    </form>
+  </dialog>
+  <script src="/static/shared.js?v=__ASSET_VERSION__"></script>
+  <script src="/static/chart.js?v=__ASSET_VERSION__"></script>
+  <script src="/static/multi-chart-interactions.js?v=__ASSET_VERSION__"></script>
+  <script src="/static/multi-chart.js?v=__ASSET_VERSION__"></script>
+</body>
+</html>

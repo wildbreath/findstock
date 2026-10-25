@@ -1,0 +1,112 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>复盘表 · 沪深A股自动筛选系统</title>
+  <link rel="stylesheet" href="/static/styles.css?v=__ASSET_VERSION__">
+  <link rel="stylesheet" href="/static/review.css?v=__ASSET_VERSION__">
+</head>
+<body class="app-shell review-page">
+  <aside class="app-sidebar">
+    <div class="sidebar-brand"><span class="brand-mark">沪</span><span class="brand-text">沪深A股<br>自动筛选系统</span></div>
+    <nav class="side-nav" aria-label="主导航">
+      <a class="side-link" href="/"><span class="side-icon" aria-hidden="true">▦</span>总览</a>
+      <a class="side-link" href="/screen"><span class="side-icon" aria-hidden="true">▤</span>条件选股</a>
+      <a class="side-link" href="/stock-ladder"><span class="side-icon" aria-hidden="true">▥</span>连板天梯</a>
+      <a class="side-link is-active" href="/review" aria-current="page"><span class="side-icon" aria-hidden="true">▦</span>复盘表</a>
+      <a class="side-link" href="/watchlist"><span class="side-icon" aria-hidden="true">★</span>自选股</a>
+      <a class="side-link" href="/multi-chart"><span class="side-icon" aria-hidden="true">▦</span>多股同列</a>
+      <a class="side-link" href="/data"><span class="side-icon" aria-hidden="true">▦</span>数据</a>
+    </nav>
+    <p class="sidebar-foot">手工记录 · 按日期复盘<br>板块、个股自由排布</p>
+  </aside>
+  <div class="app-main">
+    <header class="page-header"><div class="wrap review-heading">
+      <div><h1>复盘表</h1><p class="subtitle">按日期记录板块、个股与表现</p></div>
+      <span class="review-save-state">自动保存</span>
+    </div></header>
+    <main class="wrap review-main">
+      <div id="alert-area" class="alert-area" aria-live="polite"></div>
+      <section class="panel review-workspace" aria-label="手工复盘工作表">
+        <p class="review-notice" id="review-notice" role="alert" hidden></p>
+        <fieldset id="review-controls" class="review-controls" disabled>
+          <legend class="sr-only">复盘表工具</legend>
+          <form id="review-range" class="review-toolbar review-range">
+            <label>日期从 <input id="review-start" type="date" required></label>
+            <label>到 <input id="review-end" type="date" required></label>
+            <button class="btn" type="submit">显示日期</button>
+            <button class="btn" id="review-show-all" type="button">全部日期</button>
+            <span class="review-toolbar-spacer"></span>
+            <span class="review-save-state" id="review-status" role="status" aria-live="polite">正在读取…</span>
+            <button class="btn" id="review-save" type="button">保存</button>
+            <button class="btn" id="review-export" type="button">导出备份</button>
+            <button class="btn" id="review-fullscreen" type="button">全屏</button>
+          </form>
+          <div class="review-toolbar review-format" aria-label="单元格格式">
+            <button class="btn" data-review-kind="theme" type="button" title="把选中格标为题材，固定显示在左侧">题材</button>
+            <button class="btn" data-review-kind="stock" type="button" title="把选中格标为个股名称，固定显示在左侧">个股</button>
+            <button class="btn review-leader-button" id="review-leader" type="button" aria-pressed="false" title="将选中股票整行标为龙头，包含隐藏日期">设为龙头</button>
+            <button class="btn review-yellow-button" id="review-yellow" type="button" aria-pressed="false" title="切换黄字，保留原底色">黄字</button>
+            <span class="review-divider" aria-hidden="true"></span>
+            <span class="review-tool-label">底色</span>
+            <button class="btn review-fill-up" data-review-fill="up" type="button" title="选中格填充红色" aria-label="填充红色">红</button>
+            <button class="btn review-fill-down" data-review-fill="down" type="button" title="选中格填充绿色" aria-label="填充绿色">绿</button>
+            <button class="btn" data-review-fill="" type="button" title="恢复选中格的默认底色" aria-label="恢复默认底色">默认</button>
+            <button class="btn" id="review-bold" type="button" aria-pressed="false"><b>加粗</b></button>
+            <button class="btn" id="review-clear-format" type="button">清除格式</button>
+            <span class="review-divider" aria-hidden="true"></span>
+            <button class="btn" id="review-add-row" type="button">＋ 添加行</button>
+            <button class="btn" id="review-insert-row" type="button">下方插入</button>
+            <button class="btn" id="review-row-up" type="button" title="选中股票整行上移，保留所有日期和格式">上移</button>
+            <button class="btn" id="review-row-down" type="button" title="选中股票整行下移，保留所有日期和格式">下移</button>
+            <button class="btn" id="review-delete-row" type="button">删除行</button>
+            <button class="btn" id="review-undo" type="button" disabled>撤销</button>
+            <button class="btn" id="review-redo" type="button" disabled>重做</button>
+          </div>
+          <div class="review-edit-row"><div class="review-formula">
+            <output id="review-address" aria-live="polite">请选择单元格</output>
+            <textarea id="review-text" rows="1" maxlength="2000" aria-label="当前单元格内容" placeholder="选中单元格后输入板块、股票名称或复盘记录"></textarea>
+            <button class="btn" id="review-clear" type="button">清空内容</button>
+          </div>
+          <div class="review-bottom">
+            <span id="review-count">正在准备表格…</span>
+            <div>
+              <button class="btn btn-mini" id="review-hide-date" type="button" disabled>隐藏选中日期</button>
+              <button class="btn btn-mini" id="review-restore-dates" type="button" disabled>恢复隐藏日期</button>
+              <label>缩放 <select id="review-zoom" aria-label="表格缩放"><option value="0.75">75%</option><option value="1" selected>100%</option><option value="1.25">125%</option><option value="1.5">150%</option></select></label>
+            </div>
+          </div>
+          </div>
+        </fieldset>
+        <div id="review-sticky-head" class="review-sticky-head" aria-hidden="true" hidden></div>
+        <div class="review-grid-scroll" id="review-scroll" aria-label="复盘日期表格" tabindex="0">
+          <table id="review-grid" class="review-grid" role="grid" aria-label="按日期排列的手工复盘表" aria-multiselectable="true"></table>
+        </div>
+        <div id="review-cell-menu" class="review-cell-menu" role="menu" aria-label="单元格快捷操作" hidden>
+          <button type="button" role="menuitem" tabindex="-1" data-review-action="edit">编辑内容 <kbd>F2</kbd></button>
+          <button type="button" role="menuitem" tabindex="-1" data-review-action="yellow">黄字</button>
+          <button type="button" role="menuitem" tabindex="-1" data-review-action="leader">设为龙头</button>
+          <button type="button" role="menuitem" tabindex="-1" data-review-action="clear">清空内容 <kbd>Delete</kbd></button>
+          <hr role="separator">
+          <button type="button" role="menuitem" tabindex="-1" data-review-action="copy">复制 <kbd>Ctrl+C</kbd></button>
+          <button type="button" role="menuitem" tabindex="-1" data-review-action="paste">粘贴 <kbd>Ctrl+V</kbd></button>
+          <hr role="separator">
+          <button type="button" role="menuitem" tabindex="-1" data-review-action="insert-row">下方插入行</button>
+          <button type="button" role="menuitem" tabindex="-1" data-review-action="move-up">整行上移</button>
+          <button type="button" role="menuitem" tabindex="-1" data-review-action="move-down">整行下移</button>
+          <button class="review-menu-danger" type="button" role="menuitem" tabindex="-1" data-review-action="delete-row">删除整行</button>
+        </div>
+      </section>
+      <div class="review-help">
+        <p>单击选格，双击或 F2 编辑；选格后直接输入可替换内容。方向键换格，拖动鼠标或 Shift＋点击框选，右键打开快捷操作。点击左侧股票可选择该行可见格。</p>
+        <p>Enter / Tab 换格，Alt＋Enter 换行，Esc 取消正在编辑的内容；Ctrl＋Z 撤销，Ctrl＋S 保存。支持从 Excel 复制粘贴多格；龙头标记和整行移动包含隐藏日期。</p>
+        <span id="review-calendar-note"></span>
+      </div>
+      <button class="btn" id="review-reload" type="button">重新读取已保存版本</button>
+    </main>
+  </div>
+  <script src="/static/shared.js?v=__ASSET_VERSION__"></script>
+  <script src="/static/review.js?v=__ASSET_VERSION__"></script>
+</body>
+</html>

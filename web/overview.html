@@ -1,0 +1,71 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>总览 · 沪深A股自动筛选系统</title>
+  <link rel="stylesheet" href="/static/styles.css?v=__ASSET_VERSION__">
+</head>
+<body class="app-shell overview-page">
+  <aside class="app-sidebar">
+    <div class="sidebar-brand"><span class="brand-mark">沪</span><span class="brand-text">沪深A股<br>自动筛选系统</span></div>
+    <nav class="side-nav" aria-label="主导航">
+      <a class="side-link is-active" href="/" aria-current="page"><span class="side-icon" aria-hidden="true">▦</span>总览</a>
+      <a class="side-link" href="/screen"><span class="side-icon" aria-hidden="true">▤</span>条件选股</a>
+      <a class="side-link" href="/stock-ladder"><span class="side-icon" aria-hidden="true">▥</span>连板天梯</a>
+      <a class="side-link" href="/review"><span class="side-icon" aria-hidden="true">▦</span>复盘表</a>
+      <a class="side-link" href="/watchlist"><span class="side-icon" aria-hidden="true">★</span>自选股</a>
+      <a class="side-link" href="/multi-chart"><span class="side-icon" aria-hidden="true">▦</span>多股同列</a>
+      <a class="side-link" href="/data"><span class="side-icon" aria-hidden="true">▦</span>数据</a>
+    </nav>
+    <p class="sidebar-foot">数据来源: akshare (新浪 / 腾讯)<br>本地 SQLite 缓存 · 交易日历判定</p>
+  </aside>
+  <div class="app-main">
+    <header class="page-header"><div class="wrap"><h1>总览</h1></div></header>
+    <main class="wrap">
+      <div id="alert-area" class="alert-area" aria-live="polite"></div>
+      <section class="panel">
+        <div class="overview-heading">
+          <div><h2>连板板块概览</h2><p class="table-note">按真实行业分级，查看连板分布与板块内个股。</p></div>
+          <div class="overview-controls">
+            <label>交易日<select id="overview-date" class="cal-select" disabled aria-label="选择总览交易日"></select></label>
+            <button id="overview-refresh" class="btn btn-primary" type="button">刷新数据</button>
+          </div>
+        </div>
+        <p id="overview-status" class="table-note" role="status">正在读取涨停股池…</p>
+        <div id="overview-metrics" class="overview-metrics" aria-label="当日涨停统计"></div>
+      </section>
+      <section class="panel" aria-labelledby="overview-sectors-title">
+        <div class="overview-heading">
+          <h2 id="overview-sectors-title">行业板块</h2>
+          <div class="overview-controls">
+            <label>搜索板块<input id="overview-search" type="search" placeholder="输入行业名称" maxlength="60"></label>
+            <label>板块层级<select id="overview-level" class="cal-select"><option value="1">一级行业</option><option value="2">二级行业</option></select></label>
+            <label>排序<select id="overview-sort" class="cal-select"><option value="count">涨停数量</option><option value="height">连板高度</option><option value="multi">连板数量</option></select></label>
+            <label class="overview-check"><input id="overview-exclude-st" type="checkbox" checked>排除 ST</label>
+            <label class="overview-check"><input id="overview-multi" type="checkbox" checked>只看连板（≥2板）</label>
+          </div>
+        </div>
+        <div id="overview-sectors" class="overview-sectors" aria-busy="true"><p class="condition-empty">正在加载板块…</p></div>
+        <p id="overview-sector-status" class="table-note" role="status"></p>
+        <button id="overview-sector-retry" class="btn" type="button" hidden>重试板块归属</button>
+        <p class="table-note">行情来自所选日的真实涨停池，默认仅看连板；行业分级采用东方财富当前归属，不代表历史当天归属或涨停原因。每个板块按股票代码去重，多归属股票可出现在多个板块，板块数不可直接相加。查询未完成、失败或缺少分级的股票单列，不猜测归属。此处仅展示涨停池内个股，不包含板块全部成分股。</p>
+      </section>
+      <section id="overview-detail" class="panel" hidden aria-labelledby="overview-detail-title">
+        <div class="overview-heading"><h2 id="overview-detail-title" tabindex="-1">板块涨停股</h2><button id="overview-show-all" class="btn" type="button">返回全部股池</button></div>
+        <div id="overview-subsectors" class="overview-sectors" aria-label="当前一级行业内的二级板块"></div>
+        <p class="table-note">按连板数排序；点击股票名称查看 K 线，日线数据可在<a href="/data">数据页面</a>下载。</p>
+        <div class="table-scroll"><table>
+          <thead><tr><th>股票代码</th><th>股票名称</th><th>行业</th><th>连板数</th><th>首次封板</th><th>成交额</th></tr></thead>
+          <tbody id="overview-stocks"></tbody>
+        </table></div>
+      </section>
+    </main>
+    <footer class="app-footer"><div class="wrap">涨停池获取成功后自动保存；收盘存档优先读取，刷新失败时保留旧存档。</div></footer>
+  </div>
+  <script src="/static/shared.js?v=__ASSET_VERSION__"></script>
+  <script src="/static/chart.js?v=__ASSET_VERSION__"></script>
+  <script src="/static/stock-sectors.js?v=__ASSET_VERSION__"></script>
+  <script src="/static/overview.js?v=__ASSET_VERSION__"></script>
+</body>
+</html>
