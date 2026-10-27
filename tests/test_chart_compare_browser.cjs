@@ -12,7 +12,10 @@ const {chromium} = require(process.env.PLAYWRIGHT_MODULE || 'playwright');
     }
     const stocks = [{code: 'sh.600000', name: '主图甲'}, {code: 'sz.000001', name: '对比乙'}, {code: 'sz.000002', name: '对比<丙>'}];
     const missing = dates.at(-45), errors = [], calls = [], unexpected = [];
-    let failSecond = true, failOlder = false, failSearch = false, heldSearch = null, heldChart = null, active = 0, peak = 0;
+    const categories = [{id: 1, name: '机器人<重点>', count: 2}, {id: 2, name: '低位观察', count: 1}];
+    const watchItems = [{...stocks[1], categories: [categories[0]]}, {...stocks[2], categories: [categories[1], categories[0]]},
+      {code: 'sh.600003', name: '未分类丁', categories: []}];
+    let failSecond = true, failOlder = false, failSearch = false, failLadder = false, heldLadder = null, heldSearch = null, heldChart = null, active = 0, peak = 0, searchCalls = 0;
     page.on('pageerror', error => { errors.push(error.message); console.error('Browser error:', error.message); });
     await page.route('**/*', async route => {
       const request = route.request(), url = new URL(request.url()), path = url.pathname;
@@ -22,8 +25,16 @@ const {chromium} = require(process.env.PLAYWRIGHT_MODULE || 'playwright');
         const file = path.split('/').at(-1);
         return route.fulfill({contentType: file.endsWith('.css') ? 'text/css' : 'text/javascript', body: fs.readFileSync('web/' + file, 'utf8')});
       }
-      if (path === '/api/watchlist') return route.fulfill({json: {codes: [], items: stocks.slice(1)}});
+      if (path === '/api/watchlist') return route.fulfill({json: {codes: [], items: watchItems, categories}});
+      if (path === '/api/stock-ladder') {
+        if (heldLadder) { const gate = heldLadder; heldLadder = null; await gate; }
+        if (failLadder) return route.fulfill({status: 500, json: {error: {message: '天梯暂时读取失败'}}});
+        const day = url.searchParams.get('date') || '2026-10-23';
+        return route.fulfill({json: {trade_date: day, trading_days: ['2026-10-22', '2026-10-23'],
+          items: [{...stocks[2], consecutive: day === '2026-10-22' ? 4 : 1}, {...stocks[1], consecutive: day === '2026-10-22' ? 2 : 3}]}});
+      }
       if (path === '/api/stocks/search') {
+        searchCalls++;
         const query = url.searchParams.get('q');
         if (query === '旧' && heldSearch) await heldSearch;
         if (failSearch) return route.fulfill({status: 500, json: {error: {message: '搜索暂时失败'}}});
@@ -50,12 +61,92 @@ const {chromium} = require(process.env.PLAYWRIGHT_MODULE || 'playwright');
       unexpected.push(path); return route.abort();
     });
     await page.goto('http://localhost/compare-test');
+    await page.evaluate(() => {
+      const existing = document.createElement('button');
+      existing.id = 'already-inert'; existing.inert = true; document.body.appendChild(existing);
+    });
     await page.evaluate(stocks => { document.querySelector('#open').onclick = () => openStockChart(stocks[0].code, {name: stocks[0].name, list: stocks}); }, stocks);
+    await page.locator('#open').click();
+    await page.waitForFunction(() => chartState?.payload);
+    assert.equal(await page.locator('#open').evaluate(node => node.inert), true, 'The chart makes background controls inactive');
+    const focusEnds = await page.locator('#stock-modal').evaluate(root => {
+      const controls = [...root.querySelectorAll('button:not(:disabled), input:not(:disabled), select:not(:disabled), textarea:not(:disabled), a[href], [tabindex]')]
+        .filter(node => node.tabIndex >= 0 && node.getClientRects().length);
+      return {first: controls[0].id, last: controls.at(-1).id};
+    });
+    await page.locator('#' + focusEnds.last).focus();
+    await page.keyboard.press('Tab');
+    assert.equal(await page.evaluate(() => document.activeElement.id), focusEnds.first, 'Tab wraps inside the chart');
+    await page.keyboard.press('Shift+Tab');
+    assert.equal(await page.evaluate(() => document.activeElement.id), focusEnds.last, 'Shift+Tab wraps inside the chart');
+    await page.locator('#open').evaluate(node => node.focus());
+    assert.equal(await page.locator('#stock-modal').evaluate(node => node.contains(document.activeElement)), true, 'Background controls cannot steal focus');
+    await page.keyboard.press('Escape');
+    assert.equal(await page.locator('#stock-modal').isVisible(), false);
+    assert.equal(await page.locator('#open').evaluate(node => !node.inert && document.activeElement === node), true, 'Escape restores the initiating control and its focus');
+    assert.equal(await page.locator('#already-inert').evaluate(node => node.inert), true, 'Existing inert state is preserved');
+    await page.locator('#open').click();
+    await page.waitForFunction(() => chartState?.payload);
+    await page.locator('#chart-compare-toggle').click();
+    await page.locator('#chart-compare-search').focus();
+    await page.keyboard.press('Escape');
+    assert.equal(await page.locator('#stock-modal').isVisible(), false, 'Escape also closes the chart while a search input has focus');
+    assert.equal(await page.locator('#open').evaluate(node => document.activeElement === node), true);
     await page.locator('#open').click();
     await page.waitForFunction(() => chartState?.payload);
     assert.equal(await page.locator('#chart-canvas svg').getAttribute('height'), '520');
     await page.locator('#chart-compare-toggle').click();
     const search = page.locator('#chart-compare-search');
+    assert.equal(await page.locator('#chart-compare-options input').count(), 2, 'The current list does not mix in watchlist stocks');
+    await page.locator('[data-compare-source="watchlist"]').click();
+    await page.locator('#chart-compare-category').selectOption('1');
+    assert.equal(await page.locator('#chart-compare-options input').count(), 2, 'Multi-category stocks appear in each matching category');
+    assert.equal(await page.locator('#chart-compare-options h4').first().innerText(), '机器人<重点>', 'Category names are rendered as text');
+    await page.locator('#chart-compare-options input[value="sz.000001"]').check();
+    await page.locator('#chart-compare-category').selectOption('2');
+    assert.equal(await page.locator('#chart-compare-options input').count(), 1);
+    await page.locator('#chart-compare-options input[value="sz.000002"]').check();
+    await page.locator('#chart-compare-category').selectOption('uncategorized');
+    assert.equal(await page.locator('#chart-compare-options input').inputValue(), 'sh.600003');
+    assert.match(await page.locator('#chart-compare-selection').innerText(), /已选 2 只/);
+    await page.locator('[data-compare-unselect="sz.000001"]').click();
+    const searchesBeforeFilter = searchCalls;
+    await search.fill('找不到');
+    assert.equal(await page.locator('#chart-compare-options input').count(), 0);
+    await page.waitForTimeout(300);
+    assert.equal(searchCalls, searchesBeforeFilter, 'Filtering a category must not search the whole market');
+    failLadder = true;
+    await page.locator('[data-compare-source="ladder"]').click();
+    await page.getByText(/读取失败：天梯暂时读取失败/).waitFor();
+    failLadder = false;
+    await page.locator('#chart-compare-retry').click();
+    await page.locator('#chart-compare-date').selectOption('2026-10-23');
+    await page.waitForFunction(() => !document.querySelector('#chart-compare-height').disabled);
+    assert.deepEqual(await page.locator('#chart-compare-options h4').allTextContents(), ['3 连板', '首板']);
+    await page.locator('#chart-compare-options input[value="sz.000001"]').check();
+    await page.locator('#chart-compare-height').selectOption('1');
+    assert.equal(await page.locator('#chart-compare-options input').inputValue(), 'sz.000002');
+    assert.equal(await page.locator('#chart-compare-options input').isChecked(), true, 'Selection survives switching sources');
+    await page.locator('#chart-compare-date').selectOption('2026-10-22');
+    await page.waitForFunction(() => !document.querySelector('#chart-compare-height').disabled);
+    assert.deepEqual(await page.locator('#chart-compare-options h4').allTextContents(), ['4 连板', '2 连板']);
+    let releaseLadder;
+    heldLadder = new Promise(resolve => { releaseLadder = resolve; });
+    await Promise.all([page.waitForRequest('**/api/stock-ladder?date=2026-10-23'), page.locator('#chart-compare-date').selectOption('2026-10-23')]);
+    await page.locator('[data-compare-source="current"]').click();
+    releaseLadder(); await page.waitForLoadState('networkidle');
+    assert.equal(await page.locator('#chart-compare-options input').count(), 2);
+    assert.equal(await page.locator('#chart-compare-options h4').count(), 0, 'An old ladder response cannot replace the current list');
+    if (process.env.FINDSTOCK_COMPARE_SCREENSHOT) {
+      await page.locator('[data-compare-source="watchlist"]').click();
+      await page.waitForFunction(() => !document.querySelector('#chart-compare-category').disabled);
+      await page.screenshot({path: process.env.FINDSTOCK_COMPARE_SCREENSHOT.replace('.png', '-picker.png')});
+      await page.setViewportSize({width: 375, height: 844});
+      assert.equal(await page.locator('#stock-modal').evaluate(node => node.scrollWidth <= innerWidth), true, 'The source picker fits a small phone');
+      await page.screenshot({path: process.env.FINDSTOCK_COMPARE_SCREENSHOT.replace('.png', '-picker-mobile.png')});
+      await page.setViewportSize({width: 1440, height: 1050});
+      await page.locator('[data-compare-source="current"]').click();
+    }
     await search.fill('对比');
     await page.locator('#chart-compare-options input[value="sz.000001"]').waitFor();
     await search.press('ArrowLeft');
@@ -132,6 +223,7 @@ const {chromium} = require(process.env.PLAYWRIGHT_MODULE || 'playwright');
     assert.equal(await page.locator('#chart-crosshair .cross-h').evaluate(node => node.style.display), 'none', 'Missing candles keep their date cursor but hide the price cursor');
     if (process.env.FINDSTOCK_COMPARE_SCREENSHOT) {
       await page.setViewportSize({width: 1440, height: 900});
+      await hoverAt(stocks[1].code, 30);
       await page.screenshot({path: process.env.FINDSTOCK_COMPARE_SCREENSHOT});
       await page.setViewportSize({width: 1440, height: 1050});
     }
@@ -139,6 +231,12 @@ const {chromium} = require(process.env.PLAYWRIGHT_MODULE || 'playwright');
     await comparison.hover({position: {x: 300, y: 80}});
     await page.locator('#chart-tip').waitFor();
     assert.match(await page.locator('#chart-tip').innerText(), /对比乙/);
+    assert.match(await page.locator('#chart-tip').innerText(), /收盘.*日涨跌.*区间涨跌/s);
+    assert.doesNotMatch(await page.locator('#chart-tip').innerText(), /MA5|成交量|基准/);
+    const stageBeforeHover = await page.locator('#chart-stage').boundingBox();
+    await page.mouse.move(0, 0);
+    await comparison.hover({position: {x: 300, y: 80}});
+    assert.deepEqual(await page.locator('#chart-stage').boundingBox(), stageBeforeHover, 'Hover details never shift the plot');
     const cross = await page.locator('#chart-stage .chart-crosshair').evaluateAll(nodes => nodes.map(node => node.dataset.tradeDate));
     assert.equal(new Set(cross).size, 1, 'Both columns must show the same cursor date');
     const zoomPoint = await hoverAt(stocks[1].code, 30);
@@ -181,6 +279,7 @@ const {chromium} = require(process.env.PLAYWRIGHT_MODULE || 'playwright');
     assert.equal(await page.evaluate(() => chartState.view.count), 60);
     await page.locator('#chart-compare-toggle').click();
     assert.equal(await page.locator('#chart-compare-options input[value="sz.000001"]').isDisabled(), true, 'Already added stocks must not duplicate');
+    await page.locator('[data-compare-source="market"]').click();
     let releaseSearch;
     heldSearch = new Promise(resolve => { releaseSearch = resolve; });
     await search.fill('旧'); await page.waitForTimeout(300);
@@ -191,6 +290,11 @@ const {chromium} = require(process.env.PLAYWRIGHT_MODULE || 'playwright');
     await search.fill('失败');
     await page.getByText(/搜索失败/).waitFor();
     failSearch = false;
+    heldSearch = new Promise(resolve => { releaseSearch = resolve; });
+    await search.fill('旧'); await page.waitForTimeout(300);
+    await page.locator('[data-compare-source="current"]').click();
+    releaseSearch(); await page.waitForLoadState('networkidle');
+    assert.equal(await page.locator('#chart-compare-options input[value="sz.000002"]').count(), 1, 'An old market search cannot replace a different source');
     await page.locator('#chart-compare-toggle').click();
     await page.locator('#chart-next').click();
     await page.waitForFunction(() => chartState.payload?.code === 'sz.000001');
@@ -248,8 +352,8 @@ const {chromium} = require(process.env.PLAYWRIGHT_MODULE || 'playwright');
       nodes.every(node => node.style.display !== 'none') && new Set(nodes.map(node => node.dataset.tradeDate)).size === 1), true, 'Hovering a scrolled row synchronizes all twelve stocks');
     assert.equal(await page.locator('#chart-tip').evaluate(node => {
       const tip = node.getBoundingClientRect(), stage = document.querySelector('#chart-stage').getBoundingClientRect();
-      return tip.top >= stage.top && tip.bottom <= stage.bottom;
-    }), true, 'Hover details stay visible after vertical scrolling');
+      return tip.bottom <= stage.top && tip.top >= 0;
+    }), true, 'Hover details stay above the plot after vertical scrolling');
     assert.equal(await axisVisible(), true, 'The date axis remains visible at the end of the scroll range');
     const scrollBeforeWheel = await page.locator('#chart-stage').evaluate(node => node.scrollTop);
     const countBeforeScroll = await page.evaluate(() => chartState.view.count);
@@ -261,6 +365,13 @@ const {chromium} = require(process.env.PLAYWRIGHT_MODULE || 'playwright');
     assert.equal(await page.locator('#chart-stage').evaluate(node => node.scrollWidth <= node.clientWidth), true, 'Comparison rows fit mobile width');
     assert.equal(await page.locator('.chart-lane-background').evaluateAll(nodes =>
       new Set(nodes.map(node => node.getBoundingClientRect().left)).size), 1, 'Narrow screens use one readable column');
+    await page.locator('#chart-stage').evaluate(node => { node.scrollTop = 0; });
+    await page.locator('.chart-compare-lane').first().hover({position: {x: 100, y: 80}});
+    assert.equal(await page.locator('#chart-tip').evaluate(node => {
+      const tip = node.getBoundingClientRect(), stage = document.querySelector('#chart-stage').getBoundingClientRect();
+      return tip.bottom <= stage.top && [...node.children].every(child => child.getBoundingClientRect().bottom <= tip.bottom);
+    }), true, 'Mobile hover details fit in their reserved space above the chart');
+    if (process.env.FINDSTOCK_COMPARE_SCREENSHOT) await page.screenshot({path: process.env.FINDSTOCK_COMPARE_SCREENSHOT.replace('.png', '-mobile.png')});
     await page.setViewportSize({width: 1440, height: 900});
     await page.locator('#chart-stage').evaluate(node => { node.scrollTop = 0; });
     if (process.env.FINDSTOCK_COMPARE_SCREENSHOT) await page.screenshot({path: process.env.FINDSTOCK_COMPARE_SCREENSHOT.replace('.png', '-12.png')});

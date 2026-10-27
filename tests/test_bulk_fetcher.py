@@ -96,6 +96,34 @@ def test_empty_input_yields_nothing() -> None:
     assert list(fetcher.fetch([], DAY, DAY)) == []
 
 
+def test_closing_a_fetch_waits_for_in_flight_workers():
+    from concurrent.futures import ThreadPoolExecutor
+
+    entered, release = threading.Event(), threading.Event()
+
+    class InFlight(FakeProvider):
+        def fetch_daily_bars(self, code, start, end):
+            if code == "sh.600001":
+                entered.set()
+                release.wait(timeout=5)
+            else:
+                assert entered.wait(timeout=2)
+            return [make_bar(code, DAY)]
+
+    stream = BulkFetcher(InFlight(), workers=2, chunk_size=1).fetch(
+        ["sh.600000", "sh.600001"], DAY, DAY,
+    )
+    assert next(stream).requested == ("sh.600000",)
+    with ThreadPoolExecutor(max_workers=1) as pool:
+        closed = pool.submit(stream.close)
+        try:
+            time.sleep(.05)
+            assert not closed.done()
+        finally:
+            release.set()
+        closed.result(timeout=2)
+
+
 @pytest.mark.parametrize("kind", ["wrong_code", "wrong_date", "duplicate"])
 def test_invalid_response_identity_is_reported_as_failure(kind: str) -> None:
     class Invalid(FakeProvider):

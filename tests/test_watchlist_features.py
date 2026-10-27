@@ -25,7 +25,7 @@ def client(container: Container) -> TestClient:
             make_stock("sz.000001", "平安银行"),
             make_stock("sz.300750", "宁德时代"),
         ])
-    return TestClient(create_app())
+    return TestClient(create_app(), client=("127.0.0.1", 50000))
 
 
 def test_market_search_includes_stocks_outside_watchlist(client: TestClient) -> None:
@@ -38,6 +38,23 @@ def test_market_search_includes_stocks_outside_watchlist(client: TestClient) -> 
     found = client.get("/api/stocks/search", params={"q": "300750"}).json()
     assert found[0]["name"] == "宁德时代"
     assert client.post("/api/watchlist", json={"code": found[0]["code"]}).status_code == 201
+
+
+@pytest.mark.parametrize("method", ["post", "patch"])
+def test_stale_category_does_not_remove_old_membership_or_note(client, method):
+    category = client.post("/api/watchlist/categories", json={"name": "保留分类"}).json()
+    original = client.post("/api/watchlist", json={
+        "code": "sh.600519", "note": "保留备注", "category_ids": [category["id"]],
+    }).json()
+    payload = {"category_ids": [category["id"], 999999], "note": "不应保存"}
+    if method == "post":
+        response = client.post("/api/watchlist", json={"code": "sh.600519", **payload})
+    else:
+        response = client.patch("/api/watchlist/sh.600519", json=payload)
+    assert response.status_code == 422
+    saved = client.get("/api/watchlist").json()["items"][0]
+    assert saved["categories"] == original["categories"]
+    assert saved["note"] == "保留备注"
 
 
 def test_market_search_trims_codes_and_limits_results(client: TestClient) -> None:

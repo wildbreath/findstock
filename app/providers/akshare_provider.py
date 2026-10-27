@@ -79,6 +79,7 @@ class AkshareProvider:
     """基于 akshare 的沪深A股数据源。"""
 
     name = "akshare"
+    price_adjustment = "qfq"
 
     def __init__(
         self,
@@ -413,7 +414,7 @@ class AkshareProvider:
                 f"stock_zh_a_hist_tx({symbol})",
                 ak.stock_zh_a_hist_tx,
                 symbol=symbol,
-                start_date=start.strftime("%Y%m%d"),
+                start_date="19900101",
                 end_date=end.strftime("%Y%m%d"),
                 adjust="qfq",
             )
@@ -473,15 +474,11 @@ class AkshareProvider:
         """历史简称序列 (由旧到新, 无日期)。"""
 
         _, symbol = split_code(code)
-        try:
-            frame = self._call(
-                f"stock_info_change_name({symbol})",
-                ak.stock_info_change_name,
-                symbol=symbol,
-            )
-        except ProviderError as exc:
-            logger.warning("获取历史简称失败 %s: %s", code, exc)
-            return []
+        frame = self._call(
+            f"stock_info_change_name({symbol})",
+            ak.stock_info_change_name,
+            symbol=symbol,
+        )
         if frame is None or len(frame) == 0 or "name" not in frame:
             return []
         return [str(value).strip() for value in frame["name"].tolist() if str(value).strip()]

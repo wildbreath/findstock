@@ -191,11 +191,15 @@ class WatchlistRepository:
     # --- 备注 -------------------------------------------------------------
 
     def update_note(
-        self, code: str, note: str | None, *, note_highlights: tuple[tuple[int, int], ...] = ()
+        self, code: str, note: str | None, *, note_highlights: tuple[tuple[int, int], ...] = (),
+        category_ids: list[int] | None = None,
     ) -> bool:
         """更新某只自选股的备注, 返回是否命中记录。"""
 
         with self._db.session() as conn:
+            conn.execute("BEGIN IMMEDIATE")
+            if category_ids is not None:
+                self._set_categories(conn, code, category_ids)
             cursor = conn.execute(
                 "UPDATE watchlist SET note = ?, note_highlights = ? WHERE code = ?",
                 (note, json.dumps(note_highlights), code),
@@ -281,6 +285,7 @@ class WatchlistRepository:
         """整组替换某只股票的分类 (多对多)。"""
 
         with self._db.session() as conn:
+            conn.execute("BEGIN IMMEDIATE")
             self._set_categories(conn, code, category_ids)
 
     @staticmethod
@@ -288,17 +293,15 @@ class WatchlistRepository:
         conn: sqlite3.Connection, code: str, category_ids: list[int]
     ) -> None:
         unique_ids = sorted({int(value) for value in category_ids})
+        valid_ids = {int(row["id"]) for row in conn.execute("SELECT id FROM watchlist_category")}
+        if set(unique_ids) - valid_ids:
+            raise InvalidRequestError("所选分类已不存在，请重新读取分类后重试。")
         conn.execute("DELETE FROM watchlist_member WHERE code = ?", (code,))
         if unique_ids:
-            placeholders = ",".join("?" for _ in unique_ids)
-            valid = conn.execute(
-                f"SELECT id FROM watchlist_category WHERE id IN ({placeholders})",
-                unique_ids,
-            ).fetchall()
             conn.executemany(
                 "INSERT INTO watchlist_member (code, category_id, added_at) "
                 "VALUES (?, ?, ?)",
-                [(code, int(row["id"]), _now_iso()) for row in valid],
+                [(code, category_id, _now_iso()) for category_id in unique_ids],
             )
 
     def category_ids_for(self, code: str) -> list[int]:

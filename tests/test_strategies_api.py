@@ -20,7 +20,7 @@ PREV = date(2026, 9, 11)
 
 @pytest.fixture()
 def client(container: Container) -> TestClient:
-    return TestClient(create_app())
+    return TestClient(create_app(), client=("127.0.0.1", 50000))
 
 
 @pytest.fixture()
@@ -51,6 +51,75 @@ def populated(client: TestClient, container: Container) -> Container:
 
 def conditions(*items: dict) -> list[dict]:
     return list(items)
+
+
+@pytest.mark.parametrize("kind,params", [
+    ("pct_chg_range", {"min": "abc"}), ("pct_chg_range", {"min": "NaN"}),
+    ("pct_chg_range", {"span": 1.5}), ("pct_chg_range", {"offset": 100000}),
+    ("pct_chg_range", {"inclusive": "false"}), ("listed_min_days", {"days": 100000}),
+    ("volume_ratio_range", {"min": True}),
+])
+def test_invalid_condition_is_rejected_by_every_entry_before_writes(client, container, kind, params):
+    before = client.get("/api/strategies").json()
+    items = [{"kind": kind, "params": params}]
+    for path, extra in [
+        ("/api/strategies", {"name": "不应入库"}), ("/api/strategies/preview", {}),
+        ("/api/screen", {"date": D2.isoformat()}), ("/api/screen/scan", {"month": "2026-09"}),
+    ]:
+        response = client.post(path, json={**extra, "conditions": items})
+        assert response.status_code == 422, response.text
+    assert client.get("/api/strategies").json() == before
+
+
+def test_invalid_update_preserves_saved_strategy(client):
+    created = client.post("/api/strategies", json={"name": "保留", "conditions": []}).json()
+    response = client.put(f"/api/strategies/{created['id']}", json={
+        "name": "保留", "conditions": [{"kind": "not_st", "params": {"offset": 0.5}}],
+    })
+    assert response.status_code == 422
+    assert next(item for item in client.get("/api/strategies").json()
+                if item["id"] == created["id"]) == created
+
+
+def test_legacy_bad_record_does_not_break_listing_and_cannot_run(client, container):
+    created = client.post("/api/strategies", json={"name": "旧坏记录", "conditions": []}).json()
+    with container.database.session() as conn:
+        conn.execute("UPDATE screen_strategy SET conditions = ? WHERE id = ?", (
+            '[{"kind":"pct_chg_range","params":{"min":"abc"}}]', created["id"],
+        ))
+    response = client.get("/api/strategies")
+    assert response.status_code == 200
+    bad = next(item for item in response.json() if item["id"] == created["id"])
+    assert "参数无效" in bad["conditions"][0]["label"]
+    assert client.post("/api/screen", json={"date": D2.isoformat(), "strategy_id": created["id"]}).status_code == 422
+
+
+def test_screen_reports_both_volume_offsets_without_phantom_flags(client, populated):
+    response = client.post("/api/screen", json={"date": D2.isoformat(), "conditions": [
+        {"kind": "volume_ratio_range", "params": {"offset": -1, "min": 3}},
+        {"kind": "volume_ratio_range", "params": {"offset": 0, "min": 5}},
+    ]})
+    assert response.status_code == 200
+    params = response.json()["params"]
+    assert params["first_volume_ratio_min"] == 3
+    assert params["second_volume_ratio_min"] == 5
+    assert params["exclude_st"] is False and params["exclude_newly_listed"] is False
+    assert params["pct_chg_min"] is None and params["pct_chg_max"] is None
+
+
+def test_custom_strategy_does_not_return_misleading_standard_params(client, populated):
+    response = client.post("/api/screen", json={"date": D2.isoformat(), "conditions": [
+        {"kind": "pct_chg_range", "params": {"offset": -1, "span": 1}},
+    ]})
+    assert response.status_code == 200
+    assert response.json()["params"] is None
+
+
+def test_save_rejects_excessive_conditions(client):
+    response = client.post("/api/strategies", json={"name": "过多", "conditions": [
+        {"kind": "not_st", "params": {}} for _ in range(101)
+    ]})
+    assert response.status_code == 422
 
 
 def pct_condition(day: str, low, high, inclusive: bool = False) -> dict:

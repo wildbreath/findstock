@@ -224,7 +224,7 @@ def test_api_contract_and_failures(container, service):
     app = create_app()
     container.stock_sector_service = sectors
     app.dependency_overrides[get_container] = lambda: container
-    client = TestClient(app)
+    client = TestClient(app, client=("127.0.0.1", 50000))
     data = client.get(f"/api/stocks/{CODE}/sectors").json()
     assert data["primary_sector_id"] == "eastmoney:BK1509"
     assert data["sectors"][0]["level"] == 3

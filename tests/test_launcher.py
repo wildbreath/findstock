@@ -5,6 +5,9 @@ from __future__ import annotations
 import json
 import socket
 import threading
+import subprocess
+import sys
+from pathlib import Path
 from http.server import BaseHTTPRequestHandler, HTTPServer
 
 import pytest
@@ -61,6 +64,73 @@ def test_missing_modules_is_empty_in_this_environment() -> None:
     """运行环境里依赖应当是齐全的, 否则启动器会去装依赖。"""
 
     assert launcher.missing_modules() == []
+
+
+def test_bootstrap_creates_only_project_environment_and_forwards_arguments(tmp_path, monkeypatch):
+    monkeypatch.setattr(launcher, "PROJECT_ROOT", tmp_path)
+    commands = []
+
+    def run(command, **kwargs):
+        commands.append(command)
+        return subprocess.CompletedProcess(command, 0)
+
+    monkeypatch.setattr(launcher.subprocess, "run", run)
+    assert launcher.ensure_project_environment(["--no-browser", "--port", "9001"]) == 0
+    assert commands[0] == [sys.executable, "-m", "venv", str(tmp_path / ".venv")]
+    assert Path(commands[1][0]).is_relative_to(tmp_path / ".venv")
+    assert commands[1][-3:] == ["--no-browser", "--port", "9001"]
+
+
+def test_project_environment_is_reused_without_recreating_it(tmp_path, monkeypatch):
+    monkeypatch.setattr(launcher, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(launcher.sys, "prefix", str(tmp_path / ".venv"))
+    monkeypatch.setattr(launcher.subprocess, "run", lambda *args, **kwargs: pytest.fail("不应重复建环境"))
+    assert launcher.ensure_project_environment([]) is None
+
+
+def test_healthy_dependencies_do_not_run_pip(tmp_path, monkeypatch):
+    monkeypatch.setattr(launcher, "PROJECT_ROOT", tmp_path)
+    (tmp_path / "requirements.txt").write_text("fastapi==1.0\n", encoding="utf-8")
+    monkeypatch.setattr(launcher, "missing_modules", lambda: [])
+    monkeypatch.setattr(launcher, "version", lambda name: "1.0")
+    commands = []
+
+    def run(command, **kwargs):
+        commands.append(command)
+        return subprocess.CompletedProcess(command, 0)
+
+    monkeypatch.setattr(launcher.subprocess, "run", run)
+    assert launcher.ensure_dependencies() is True
+    assert all("pip" not in command for command in commands)
+
+
+def test_mismatched_dependencies_install_only_in_project_environment(tmp_path, monkeypatch):
+    monkeypatch.setattr(launcher, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(launcher.sys, "prefix", str(tmp_path / ".venv"))
+    (tmp_path / "requirements.txt").write_text("fastapi==1.0\n", encoding="utf-8")
+    monkeypatch.setattr(launcher, "missing_modules", lambda: [])
+    monkeypatch.setattr(launcher, "version", lambda name: "0.9")
+    commands = []
+
+    def run(command, **kwargs):
+        commands.append(command)
+        return subprocess.CompletedProcess(command, 0, stderr="")
+
+    monkeypatch.setattr(launcher.subprocess, "run", run)
+    assert launcher.ensure_dependencies() is True
+    assert commands[0][1:5] == ["-m", "pip", "install", "-r"]
+
+
+@pytest.mark.skipif(sys.platform != "win32", reason="Windows 启动入口")
+def test_powershell_entry_accepts_host_alias_without_touching_readonly_variable(tmp_path):
+    fake_python = tmp_path / "python.cmd"
+    fake_python.write_text("@echo off\r\nexit /b 0\r\n", encoding="ascii")
+    result = subprocess.run([
+        "powershell", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File",
+        str(launcher.PROJECT_ROOT / "scripts" / "run_server.ps1"),
+        "-Python", str(fake_python), "-Host", "127.0.0.1",
+    ], capture_output=True)
+    assert result.returncode == 0, result.stderr.decode(errors="replace")
 
 
 def test_port_is_open_detects_listener(stub_server) -> None:

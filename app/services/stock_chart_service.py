@@ -140,7 +140,8 @@ class StockChartService:
         return self._watchlist.delete_category(category_id)
 
     def update_note(
-        self, code: str, note: str | None, *, note_highlights: list[tuple[int, int]] | None = None
+        self, code: str, note: str | None, *, note_highlights: list[tuple[int, int]] | None = None,
+        category_ids: list[int] | None = None,
     ) -> bool:
         """更新自选股备注 (空字符串按"清空"处理)。"""
 
@@ -154,7 +155,7 @@ class StockChartService:
             else:
                 ranges.append((start, end))
         return self._watchlist.update_note(
-            code, cleaned or None, note_highlights=tuple(ranges)
+            code, cleaned or None, note_highlights=tuple(ranges), category_ids=category_ids
         )
 
     def reorder_watchlist(self, codes: list[str]) -> list[str]:

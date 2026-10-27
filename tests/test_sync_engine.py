@@ -123,6 +123,80 @@ def pending_dates(container):
     return json.loads(container.meta_repository.get("ladder_sync_pending_dates:v1"))
 
 
+def _adjusted_provider(provider, monkeypatch):
+    provider.price_adjustment = "qfq"
+    prices = [Decimal("9"), Decimal("9.9"), Decimal("10.89")]
+    previous = [Decimal("8.5"), *prices[:-1]]
+    bars = [replace(make_bar(CODE, day, close=float(close)), preclose=preclose,
+                    pct_chg=(close / preclose - 1) * 100)
+            for day, close, preclose in zip((OLD, FIRST, LATEST), prices, previous)]
+
+    def fetch(code, start, end):
+        provider.calls.append(("bars", start, end))
+        return [bar for bar in bars if start <= bar.trade_date <= end]
+
+    monkeypatch.setattr(provider, "fetch_daily_bars", fetch)
+    return bars
+
+
+def test_qfq_incremental_updates_old_prices_in_the_same_transaction(container, engine, monkeypatch):
+    instance, provider = engine
+    expected = _adjusted_provider(provider, monkeypatch)
+    with container.database.session() as conn:
+        container.meta_repository.set(conn, "qfq_full_history:v1", "consistent")
+    result = run_sync(container, instance)
+    stored = container.bar_repository.load_recent_bars(CODE)
+    assert result.status is SyncStatus.SUCCEEDED
+    assert ("bars", OLD, LATEST) in provider.calls
+    assert [bar.close for bar in stored] == [bar.close for bar in expected]
+    assert stored[1].preclose == stored[0].close
+    assert stored[2].preclose == stored[1].close
+
+
+def test_first_qfq_update_repairs_history_even_if_all_days_were_marked_complete(container, engine, monkeypatch):
+    instance, provider = engine
+    expected = _adjusted_provider(provider, monkeypatch)
+    seed(container, open_days=[OLD, FIRST, LATEST],
+         bars=[make_bar(CODE, day, close=20) for day in (OLD, FIRST, LATEST)])
+    result = run_sync(container, instance)
+    assert result.status is SyncStatus.SUCCEEDED
+    assert [bar.close for bar in container.bar_repository.load_recent_bars(CODE)] == [bar.close for bar in expected]
+    assert container.meta_repository.get("qfq_full_history:v1") == "consistent"
+    provider.calls.clear()
+    run_sync(container, instance, run_id="already-adjusted")
+    assert not any(call[0] == "bars" for call in provider.calls)
+
+
+@pytest.mark.parametrize("problem", ["missing", "empty", "invalid", "mixed"])
+def test_qfq_bad_history_preserves_all_original_prices(container, engine, monkeypatch, problem):
+    instance, provider = engine
+    bars = _adjusted_provider(provider, monkeypatch)
+    if problem == "missing":
+        bars.pop(0)
+    elif problem == "empty":
+        bars.clear()
+    elif problem == "invalid":
+        bars[0] = replace(bars[0], low=Decimal("100"))
+    else:
+        bars[1] = replace(bars[1], preclose=Decimal("20"))
+    with pytest.raises(RuntimeError, match="复权行情未完整更新"):
+        run_sync(container, instance)
+    assert container.bar_repository.load_recent_bars(CODE) == [make_bar(CODE, OLD)]
+    assert container.meta_repository.get("qfq_full_history:v1") is None
+
+
+def test_qfq_targeted_backfill_also_keeps_newer_local_history_consistent(container, engine, monkeypatch):
+    instance, provider = engine
+    expected = _adjusted_provider(provider, monkeypatch)
+    seed(container, open_days=[OLD, FIRST, LATEST],
+         bars=[make_bar(CODE, day, close=20) for day in (OLD, FIRST, LATEST)])
+    with container.database.session() as conn:
+        container.meta_repository.set(conn, "qfq_full_history:v1", "consistent")
+    run_sync(container, instance, mode=SyncMode.TARGETED, dates=[FIRST])
+    assert ("bars", OLD, LATEST) in provider.calls
+    assert [bar.close for bar in container.bar_repository.load_recent_bars(CODE)] == [bar.close for bar in expected]
+
+
 def test_incremental_archives_new_dates_before_downloading_bars(container, engine):
     instance, provider = engine
     result = run_sync(container, instance)

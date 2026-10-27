@@ -21,7 +21,7 @@ PREV = date(2026, 9, 11)
 def client(container: Container) -> TestClient:
     """基于临时数据库的测试客户端。"""
 
-    return TestClient(create_app())
+    return TestClient(create_app(), client=("127.0.0.1", 50000))
 
 
 @pytest.fixture()

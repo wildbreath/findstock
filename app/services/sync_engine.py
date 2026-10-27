@@ -51,6 +51,7 @@ _CALENDAR_PADDING_DAYS = 10
 _INCREMENTAL_LOOKBACK_DAYS = 90
 _LADDER_PENDING_KEY = "ladder_sync_pending_dates:v1"
 _LADDER_DATES = TypeAdapter(list[date])
+_PRICE_BASIS_KEY = "qfq_full_history:v1"
 
 #: A 股收盘时间。当天收盘前行情还不完整, 不能算作 "最新可用交易日",
 #: 否则盘中执行更新会把半天数据当成完整的一天记进 synced_day。
@@ -118,12 +119,13 @@ class SyncEngine:
     ) -> None:
         """执行同步; 所有异常都会被记录到任务状态中。"""
 
-        self._sync.update(run_id, phase="preparing", message="正在准备同步任务")
         self._suspensions.clear()
         self._listing_checked = False
         self._delisting_checked = False
         provider = None
         try:
+            _raise_if_cancelled(self._sync, run_id)
+            self._sync.update(run_id, phase="preparing", message="正在准备同步任务")
             provider = self._provider_factory()
             provider.open()
             plan = self._build_plan(provider, mode, run_id, target_dates)
@@ -144,8 +146,13 @@ class SyncEngine:
                     ladder_message += " 悟道题材未完成: " + str(exc)
             _raise_if_cancelled(self._sync, run_id)
             failures = self._download(provider, run_id, plan) if plan.fetch_dates else {}
+            if getattr(provider, "price_adjustment", None) == "qfq" and failures:
+                raise RuntimeError("复权行情未完整更新，已保留失败股票的原行情: " + str(failures))
             verification = self._finalize(provider, run_id, plan, failures)
             _raise_if_cancelled(self._sync, run_id)
+            if getattr(provider, "price_adjustment", None) == "qfq":
+                with self._db.session() as conn:
+                    self._meta.set(conn, _PRICE_BASIS_KEY, "consistent")
             message = self._success_message(plan) if plan.fetch_dates else "本地日线已是最新, 无需重复下载。"
             message += verification + ladder_message
             self._sync.finish(run_id, SyncStatus.SUCCEEDED, message=message, error=ladder_warning)
@@ -180,6 +187,9 @@ class SyncEngine:
 
         targets = tuple(sorted(set(target_dates or ())))
         calendar_start = history_start
+        stored_start, _ = self._bars.bounds()
+        if stored_start is not None:
+            calendar_start = min(calendar_start, stored_start)
         if targets:
             calendar_start = min(
                 calendar_start, min(targets) - timedelta(days=_CALENDAR_PADDING_DAYS)
@@ -201,6 +211,9 @@ class SyncEngine:
 
         codes = self._refresh_universe(provider, run_id, latest_trading_day)
         fetch_dates = self._resolve_fetch_dates(mode, latest_trading_day, targets, open_days)
+        adjusted = getattr(provider, "price_adjustment", None) == "qfq"
+        if adjusted and self._meta.get(_PRICE_BASIS_KEY) is None:
+            fetch_dates = open_days
 
         if not fetch_dates:
             return SyncPlan(
@@ -216,7 +229,7 @@ class SyncEngine:
         fetch_start, fetch_end = fetch_dates[0], fetch_dates[-1]
 
         pending_note = ""
-        if mode is SyncMode.FULL:
+        if mode is SyncMode.FULL and not adjusted:
             pending = self._stocks.codes_needing_sync(fetch_end)
             if len(pending) < len(codes):
                 pending_note = f", 已跳过 {len(codes) - len(pending)} 只已下载的股票"
@@ -394,19 +407,28 @@ class SyncEngine:
         failures: dict[str, str] = {}
         total = len(plan.codes)
         remaining = list(plan.codes)
-        open_days = set(self._calendar.open_days(plan.fetch_start, plan.fetch_end))
-        stream = fetcher.fetch(remaining, plan.fetch_start, plan.fetch_end)
+        adjusted = getattr(provider, "price_adjustment", None) == "qfq"
+        fetch_start, fetch_end = plan.fetch_start, plan.fetch_end
+        if adjusted:
+            stored_start, stored_end = self._bars.bounds()
+            fetch_start = min(fetch_start, stored_start or fetch_start)
+            fetch_end = max(fetch_end, stored_end or fetch_end)
+        open_days = set(self._calendar.open_days(fetch_start, fetch_end))
+        stream = fetcher.fetch(remaining, fetch_start, fetch_end)
         try:
             for chunk in stream:
                 _raise_if_cancelled(self._sync, run_id)
-                if chunk.bars:
+                refresh_errors = {}
+                if adjusted:
+                    refresh_errors = self._persist_adjusted_history(chunk.bars, open_days, chunk.requested)
+                elif chunk.bars:
                     self._persist([bar for bar in chunk.bars if bar.trade_date in open_days])
                 bad = {bar.code for bar in chunk.bars if _bar_problem(bar) or bar.pct_chg is None}
                 dates_by_code: dict[str, set[date]] = {}
                 for bar in chunk.bars:
                     dates_by_code.setdefault(bar.code, set()).add(bar.trade_date)
                 succeeded = [
-                    code for code in chunk.requested if code not in chunk.failed_codes
+                    code for code in chunk.requested if code not in chunk.failed_codes and code not in refresh_errors
                     and code not in bad and set(plan.fetch_dates) <= dates_by_code.get(code, set())
                 ]
                 if succeeded:
@@ -414,6 +436,7 @@ class SyncEngine:
                 for code in chunk.requested:
                     failures.pop(code, None)
                 failures.update(dict(chunk.errors))
+                failures.update(refresh_errors)
                 for code in chunk.requested:
                     if code in remaining:
                         remaining.remove(code)
@@ -432,6 +455,39 @@ class SyncEngine:
             logger.warning("仍有 %d 只股票未能下载", len(remaining))
             failures.update({code: "抓取器未返回该股票的结果" for code in remaining})
         return failures
+
+    def _persist_adjusted_history(
+        self, bars: Sequence[DailyBar], open_days: set[date], codes: Sequence[str]
+    ) -> dict[str, str]:
+        """每只股票整段更新同一复权口径；缺行或坏值时整只保留原数据。"""
+
+        grouped: dict[str, list[DailyBar]] = {code: [] for code in codes}
+        for bar in bars:
+            grouped.setdefault(bar.code, []).append(bar)
+        errors = {}
+        with self._db.session() as conn:
+            for code, history in grouped.items():
+                existing = {date.fromisoformat(row["trade_date"]) for row in conn.execute(
+                    "SELECT trade_date FROM daily_bar WHERE code = ? AND close IS NOT NULL", (code,)
+                )}
+                received = {bar.trade_date for bar in history if bar.trade_date in open_days}
+                if not existing <= received or any(
+                    _bar_problem(bar) or bar.trade_date not in open_days for bar in history
+                ):
+                    errors[code] = "完整复权历史缺行或含无效价格，未覆盖原数据"
+                    continue
+                ordered = sorted(history, key=lambda bar: bar.trade_date)
+                if any(
+                    current.preclose is not None and previous.close is not None
+                    and not math.isclose(float(current.preclose), float(previous.close), abs_tol=1e-6)
+                    for previous, current in zip(ordered, ordered[1:])
+                ):
+                    errors[code] = "返回的复权历史价格不连续，未覆盖原数据"
+                    continue
+                self._bars.upsert_bars(
+                    conn, (bar for bar in history if bar.trade_date in open_days), replace_price_basis=True
+                )
+        return errors
 
     def _persist(self, bars: Sequence[DailyBar]) -> None:
         with self._db.session() as conn:
@@ -598,7 +654,9 @@ class SyncEngine:
 
 def _raise_if_cancelled(sync: SyncRepository, run_id: str) -> None:
     progress = sync.get(run_id)
-    if progress is not None and progress.status is not SyncStatus.RUNNING:
+    if progress is not None and (
+        progress.status is not SyncStatus.RUNNING or progress.phase == "cancelling"
+    ):
         raise SyncCancelledError()
 
 

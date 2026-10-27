@@ -171,8 +171,9 @@ def update_watchlist(
         service.update_note(
             code, payload.note if "note" in fields else current.note,
             note_highlights=payload.note_highlights,
+            category_ids=payload.category_ids,
         )
-    if payload.category_ids is not None:
+    elif payload.category_ids is not None:
         service.set_categories(code, payload.category_ids)
     for entry in service.watchlist():
         if entry.item.code == code:

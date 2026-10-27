@@ -9,6 +9,7 @@ import pytest
 from app.container import Container
 from app.core.errors import DataNotAvailableError
 from app.domain.enums import RejectionReason, StBasis
+from app.domain.conditions import ConditionSpec, ScreenStrategy
 from app.domain.models import DailyBar
 from app.services.screener_service import ScreenerService
 from tests.factories import make_bar, make_stock, seed
@@ -17,6 +18,59 @@ D0 = date(2026, 9, 14)
 D1 = date(2026, 9, 15)
 D2 = date(2026, 9, 16)
 PREV = date(2026, 9, 11)
+
+
+@pytest.mark.parametrize("offsets", [(-1,), (0, -1), (-1, 0)])
+def test_st_conditions_use_each_requested_day(container, offsets):
+    code = "sh.600001"
+    seed(container, open_days=[PREV, D0, D1, D2], stocks=[make_stock(code, "普通股份")],
+         bars=[make_bar(code, day) for day in (D0, D1, D2)],
+         names={D1: [(code, "*ST旧名")], D2: [(code, "普通股份")]})
+    strategy = ScreenStrategy(name="历史ST", conditions=tuple(
+        ConditionSpec("not_st", {"offset": offset}) for offset in offsets
+    ))
+    assert container.screener_service.screen(D2, strategy=strategy).hit_count == 0
+
+
+def test_missing_one_st_snapshot_falls_back_for_that_stock(container):
+    codes = ["sh.600001", "sh.600002"]
+    seed(container, open_days=[PREV, D0, D1, D2],
+         stocks=[make_stock(code, "普通股份") for code in codes],
+         bars=[make_bar(code, day) for code in codes for day in (D0, D1, D2)],
+         names={D2: [(codes[0], "普通股份")]})
+    history = StubNameHistory({codes[1]: ["普通股份"]})
+    service = ScreenerService(container.calendar_service, container.bar_repository,
+                              container.stock_repository, container.sync_repository, history)
+    strategy = ScreenStrategy(name="ST", conditions=(ConditionSpec("not_st"),))
+    result = service.screen(D2, strategy=strategy)
+    assert history.calls == [codes[1]]
+    assert next(hit for hit in result.hits if hit.code == codes[1]).st_basis is StBasis.NAME_HISTORY
+
+
+@pytest.mark.parametrize("offsets", [(-1, 0), (0, -1)])
+def test_multiple_st_conditions_keep_all_dates_and_any_inference_warning(container, offsets):
+    code = "sh.600001"
+    seed(container, open_days=[PREV, D0, D1, D2], stocks=[make_stock(code, "普通股份")],
+         bars=[make_bar(code, day) for day in (D0, D1, D2)], names={D2: [(code, "普通股份")]})
+    service = ScreenerService(container.calendar_service, container.bar_repository,
+                              container.stock_repository, container.sync_repository,
+                              StubNameHistory({code: ["*ST旧名", "普通股份"]}))
+    strategy = ScreenStrategy(name="多个ST日期", conditions=tuple(
+        ConditionSpec("not_st", {"offset": offset}) for offset in offsets
+    ))
+    result = service.screen(D2, strategy=strategy)
+    assert result.hit_count == 1
+    assert result.hits[0].st_exact is False
+    assert str(D1) in result.hits[0].st_detail and str(D2) in result.hits[0].st_detail
+    assert any("不是精确口径" in warning for warning in result.warnings)
+
+
+def test_strategy_without_st_filter_does_not_report_st_inference_warnings(container):
+    seed(container, open_days=[PREV, D0, D1, D2], stocks=[make_stock("sh.600001")],
+         bars=[make_bar("sh.600001", day) for day in (D0, D1, D2)])
+    result = container.screener_service.screen(D2, strategy=ScreenStrategy(name="无ST条件"))
+    assert result.hit_count == 1
+    assert not any("ST" in warning for warning in result.warnings)
 
 
 class StubNameHistory:

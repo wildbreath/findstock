@@ -18,7 +18,7 @@ D2 = date(2026, 9, 16)
 
 @pytest.fixture()
 def client(container: Container) -> TestClient:
-    return TestClient(create_app())
+    return TestClient(create_app(), client=("127.0.0.1", 50000))
 
 
 @pytest.fixture()
@@ -152,6 +152,12 @@ def test_watchlist_add_with_categories(client: TestClient, charted: Container) -
         "code": "sh.600519", "source_date": D2.isoformat(),
         "category_ids": [first, second, first, 99999],
     })
+    assert added.status_code == 422
+    assert client.get("/api/watchlist").json()["items"] == []
+    added = client.post("/api/watchlist", json={
+        "code": "sh.600519", "source_date": D2.isoformat(),
+        "category_ids": [first, second, first],
+    })
     assert added.status_code == 201
     assert {c["id"] for c in added.json()["categories"]} == {first, second}
     assert added.json()["source_date"] == D2.isoformat()
@@ -249,9 +255,10 @@ def test_watchlist_categories_crud_and_membership(
         "成长股",
     ]
 
-    # 不存在的分类 id 会被忽略, 不会写入脏数据
-    client.patch("/api/watchlist/sh.600519", json={"category_ids": [99999]})
-    assert client.get("/api/watchlist").json()["items"][0]["categories"] == []
+    # 过期分类请求必须报错并保留原归属。
+    rejected = client.patch("/api/watchlist/sh.600519", json={"category_ids": [99999]})
+    assert rejected.status_code == 422
+    assert client.get("/api/watchlist").json()["items"][0]["categories"] == listing["items"][0]["categories"]
 
 
 def test_delete_category_keeps_stock(

@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import argparse
 import importlib.util
+from importlib.metadata import PackageNotFoundError, version
 import json
 import socket
 import subprocess
@@ -37,6 +38,22 @@ REQUIRED_MODULES = ("fastapi", "uvicorn", "pydantic", "akshare")
 
 HEALTH_PATH = "/api/health"
 BROWSER_WAIT_SECONDS = 90.0
+
+
+def ensure_project_environment(argv: list[str]) -> int | None:
+    """只在项目虚拟环境中安装和启动，避免改动宿主的共享 Python。"""
+
+    environment = PROJECT_ROOT / ".venv"
+    if Path(sys.prefix).resolve() == environment.resolve():
+        return None
+    python = environment / ("Scripts/python.exe" if sys.platform == "win32" else "bin/python")
+    if not python.is_file():
+        print("[环境] 正在创建项目独立环境（仅首次运行）…")
+        result = subprocess.run([sys.executable, "-m", "venv", str(environment)], cwd=PROJECT_ROOT)
+        if result.returncode:
+            print("[环境] 创建失败，请检查 Python 是否包含 venv 和 pip。")
+            return result.returncode
+    return subprocess.run([str(python), str(Path(__file__).resolve()), *argv], cwd=PROJECT_ROOT).returncode
 
 
 def ensure_project_on_path() -> None:
@@ -82,16 +99,38 @@ def missing_modules() -> list[str]:
 def ensure_dependencies() -> bool:
     """确保依赖齐全; 缺失时尝试自动安装。返回是否可用。"""
 
-    missing = missing_modules()
-    if not missing:
-        return True
-
     requirements = PROJECT_ROOT / "requirements.txt"
-    print(f"[依赖] 缺少: {', '.join(missing)}")
     if not requirements.is_file():
         print(f"[依赖] 找不到 {requirements}, 无法自动安装。")
         return False
 
+    problems = missing_modules()
+    for line in requirements.read_text(encoding="utf-8-sig").splitlines():
+        package, separator, wanted = line.partition("==")
+        if not separator or line.lstrip().startswith("#"):
+            continue
+        package = package.strip().split("[")[0]
+        try:
+            installed = version(package)
+        except PackageNotFoundError:
+            installed = None
+        if installed != wanted.strip():
+            problems.append(f"{package} 需要 {wanted.strip()}（当前 {installed or '未安装'}）")
+    if not problems:
+        check = subprocess.run(
+            [sys.executable, "-c", "; ".join(f"import {name}" for name in REQUIRED_MODULES)],
+            capture_output=True, text=True,
+        )
+        if check.returncode == 0:
+            return True
+        print("[依赖] 依赖无法正常导入，请在项目环境中重新安装依赖。")
+        print(check.stderr)
+        return False
+
+    if Path(sys.prefix).resolve() != (PROJECT_ROOT / ".venv").resolve():
+        print("[依赖] 自动安装仅允许在项目 .venv 中运行，请通过启动器启动。")
+        return False
+    print(f"[依赖] 需要补齐: {', '.join(problems)}")
     print("[依赖] 正在自动安装, 首次运行需要几分钟…")
     result = subprocess.run(  # noqa: S603 - 参数全部由本模块构造
         [sys.executable, "-m", "pip", "install", "-r", str(requirements)],
@@ -102,11 +141,14 @@ def ensure_dependencies() -> bool:
         print(f'       "{sys.executable}" -m pip install -r "{requirements}"')
         return False
 
-    # 让本次进程也能看到新装的包。
+    # 校验在独立进程中进行，避免 Windows 锁住待更新的扩展模块。
     importlib.invalidate_caches()
-    still_missing = missing_modules()
-    if still_missing:
-        print(f"[依赖] 安装后仍然缺少: {', '.join(still_missing)}")
+    check = subprocess.run(
+        [sys.executable, "-c", "; ".join(f"import {name}" for name in REQUIRED_MODULES)],
+        capture_output=True, text=True,
+    )
+    if check.returncode:
+        print(f"[依赖] 安装后仍无法导入: {check.stderr}")
         return False
     print("[依赖] 安装完成。")
     return True
@@ -207,6 +249,9 @@ def main(argv: list[str] | None = None) -> int:
     args = parse_args(argv)
     ensure_project_on_path()
     configure_stdout()
+    child_result = ensure_project_environment(sys.argv[1:] if argv is None else argv)
+    if child_result is not None:
+        return child_result
     set_console_title("沪深A股自动筛选系统")
 
     print("=" * 62)
@@ -217,23 +262,24 @@ def main(argv: list[str] | None = None) -> int:
         print("[退出] 依赖不完整, 启动已中止。")
         return 1
 
+    connect_host = "127.0.0.1" if args.host == "0.0.0.0" else args.host
     # 已经启动过就直接复用, 避免重复占用端口。
-    if health_of(args.host, args.port) is not None:
-        url = f"http://{args.host}:{args.port}"
+    if health_of(connect_host, args.port) is not None:
+        url = f"http://{connect_host}:{args.port}"
         print(f"[启动] 服务已在运行: {url}")
         if not args.no_browser:
             webbrowser.open(url)
         return 0
 
     try:
-        port = find_free_port(args.host, args.port)
+        port = find_free_port(connect_host, args.port)
     except RuntimeError as exc:
         print(f"[退出] {exc}")
         return 1
     if port != args.port:
         print(f"[启动] 端口 {args.port} 已被占用, 改用 {port}")
 
-    url = f"http://{args.host}:{port}"
+    url = f"http://{connect_host}:{port}"
     print(f"[启动] 正在启动服务: {url}")
 
     from app.container import Container
@@ -250,7 +296,7 @@ def main(argv: list[str] | None = None) -> int:
     if not args.no_browser:
         threading.Thread(
             target=open_browser_when_ready,
-            args=(args.host, port, url),
+            args=(connect_host, port, url),
             daemon=True,
         ).start()
 

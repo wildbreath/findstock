@@ -103,5 +103,16 @@ context.api = async (path) => {
   }
   assert.equal(evaluate('stockSectorActive'), 0);
   assert.equal(evaluate('stockSectorQueue.length'), 0);
+  let cachedReads = 0;
+  context.api = async () => {
+    await new Promise(setImmediate);
+    cachedReads++;
+    return {...profile, stale: false, fetched_at: '2000-01-01T00:00:00Z'};
+  };
+  evaluate("stockSectorCache.clear(); stockSectorUpdated = code => queueStockSectors(code); queueStockSectors('sz.000001')");
+  for (let i = 0; i < 8; i++) await new Promise(setImmediate);
+  evaluate('stockSectorUpdated = () => {}');
+  for (let i = 0; i < 4; i++) await new Promise(setImmediate);
+  assert.equal(cachedReads, 1, 'An old upstream timestamp must not cause a redraw/refetch loop');
   console.log("Stock sector frontend checks passed");
 })().catch((error) => { console.error(error); process.exitCode = 1; });

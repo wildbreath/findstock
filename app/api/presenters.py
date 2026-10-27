@@ -22,7 +22,8 @@ from app.api.schemas import (
     WatchlistItemOut,
     WatchlistResponse,
 )
-from app.domain.conditions import ScreenStrategy
+from app.core.errors import InvalidRequestError
+from app.domain.conditions import ConditionSpec, ScreenStrategy, validate_conditions
 from app.domain.enums import Board
 from app.domain.models import DEFAULT_CRITERIA, DailyBar, ScreenHit, ScreenResult, SyncProgress
 from app.domain.rules import rule_description
@@ -153,12 +154,19 @@ def to_strategy_out(strategy: ScreenStrategy | None) -> StrategyOut:
             StrategyConditionOut(
                 kind=spec.kind,
                 title=spec.title(),
-                label=spec.label(),
+                label=_strategy_label(spec),
                 params=dict(spec.default_params()),
             )
             for spec in strategy.conditions
         ],
     )
+
+
+def _strategy_label(spec: ConditionSpec) -> str:
+    try:
+        return validate_conditions((spec,))[0].label()
+    except InvalidRequestError as exc:
+        return f"参数无效，请编辑此条件: {exc.message}"
 
 
 def _condition_descriptions(strategy: ScreenStrategy | None) -> dict[str, str]:
@@ -172,29 +180,47 @@ def _condition_descriptions(strategy: ScreenStrategy | None) -> dict[str, str]:
     }
 
 
-def params_from_strategy(strategy: ScreenStrategy | None) -> ScreenParams:
-    """从策略条件里尽力还原"标准参数"(供旧前端/脚本读取本次口径)。"""
+def params_from_strategy(strategy: ScreenStrategy | None) -> ScreenParams | None:
+    """只返回能等价表达策略的标准参数，避免给自定义条件附上错误口径。"""
 
     params = ScreenParams()
     if strategy is None:
         return params
     values = params.model_dump()
-    for spec in strategy.conditions:
-        if spec.kind == "volume_ratio_range":
-            leg = spec.text("leg", "first")
-            prefix = "first" if leg == "first" else "second"
+    values.update(
+        first_volume_ratio_min=None, first_volume_ratio_max=None,
+        second_volume_ratio_min=None, second_volume_ratio_max=None,
+        pct_chg_min=None, pct_chg_max=None, exclude_st=False, exclude_newly_listed=False,
+    )
+    represented: set[tuple[str, int]] = set()
+    for item in strategy.conditions:
+        spec = item.normalized()
+        offset = spec.integer("offset", 0)
+        key = (spec.kind, offset)
+        if key in represented:
+            return None
+        represented.add(key)
+        if spec.kind == "volume_ratio_range" and offset in {-1, 0}:
+            prefix = "first" if offset == -1 else "second"
             values[f"{prefix}_volume_ratio_min"] = _optional_float(spec.number("min"))
             values[f"{prefix}_volume_ratio_max"] = _optional_float(spec.number("max"))
             values[f"{prefix}_volume_ratio_inclusive"] = spec.flag("inclusive")
-        elif spec.kind == "pct_chg_range" and spec.text("day", "all") == "all":
+        elif spec.kind == "pct_chg_range" and offset == 0 and spec.integer("span", 3) == 3:
             values["pct_chg_min"] = _optional_float(spec.number("min"))
             values["pct_chg_max"] = _optional_float(spec.number("max"))
             values["pct_chg_inclusive"] = spec.flag("inclusive")
-        elif spec.kind == "not_st":
+        elif spec.kind == "not_st" and offset == 0:
             values["exclude_st"] = True
         elif spec.kind == "listed_min_days":
+            if spec.integer("days", 3) != 3:
+                return None
             values["exclude_newly_listed"] = True
-    return ScreenParams(**values)
+        else:
+            return None
+    try:
+        return ScreenParams(**values)
+    except ValueError:
+        return None
 
 
 def _optional_float(value: object) -> float | None:

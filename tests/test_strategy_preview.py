@@ -12,7 +12,7 @@ from app.main import create_app
 
 @pytest.fixture()
 def client(container):
-    return TestClient(create_app())
+    return TestClient(create_app(), client=("127.0.0.1", 50000))
 
 
 def spec(kind, **params):

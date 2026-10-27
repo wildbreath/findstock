@@ -544,7 +544,7 @@ def api(container, monkeypatch):
     monkeypatch.setattr(module, "_now", lambda: datetime(2026, 10, 24, 18, tzinfo=MARKET_TIMEZONE))
     app = create_app()
     app.state.container = container
-    return TestClient(app)
+    return TestClient(app, client=("127.0.0.1", 50000))
 
 
 def test_status_and_config_api_do_not_expose_secret(container, api):

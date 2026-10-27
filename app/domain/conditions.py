@@ -15,6 +15,7 @@ from datetime import date, datetime
 from decimal import Decimal
 from typing import Any
 
+from app.core.errors import InvalidRequestError
 from app.domain.intervals import (
     compute_volume_ratio,
     format_interval,
@@ -226,6 +227,48 @@ CONDITION_CATALOG: tuple[dict[str, Any], ...] = (
 CATALOG_BY_KIND: dict[str, dict[str, Any]] = {
     entry["kind"]: entry for entry in CONDITION_CATALOG
 }
+
+MAX_CONDITIONS = 100
+
+
+def validate_conditions(conditions: tuple[ConditionSpec, ...]) -> tuple[ConditionSpec, ...]:
+    """保存、预览和执行共用参数校验；限制会扩大计算窗口的整数参数。"""
+
+    if len(conditions) > MAX_CONDITIONS:
+        raise InvalidRequestError(f"一套策略最多包含 {MAX_CONDITIONS} 个条件。")
+    validated = []
+    for item in conditions:
+        spec = item.normalized()
+        params = dict(spec.params)
+        for field_spec in CATALOG_BY_KIND[spec.kind]["params"]:
+            key = field_spec["name"]
+            value = params[key]
+            if value is None or value == "":
+                value = None if field_spec.get("optional") else field_spec["default"]
+                params[key] = value
+            if value is None:
+                continue
+            if field_spec["type"] == "bool":
+                if not isinstance(value, bool):
+                    raise InvalidRequestError(f"{spec.title()}的{field_spec['label']}必须为布尔值。")
+                continue
+            try:
+                number = Decimal(str(value))
+                valid = (
+                    not isinstance(value, bool)
+                    and number.is_finite()
+                    and Decimal(str(field_spec["min"])) <= number <= Decimal(str(field_spec["max"]))
+                )
+                integer = field_spec["step"] == 1
+                if integer:
+                    valid = valid and number == number.to_integral_value()
+            except (ValueError, ArithmeticError):
+                valid = False
+            if not valid:
+                raise InvalidRequestError(f"{spec.title()}的{field_spec['label']}超出范围或不是有效数字。")
+            params[key] = int(number) if integer else float(number)
+        validated.append(ConditionSpec(kind=spec.kind, params=params))
+    return tuple(validated)
 
 
 @dataclass(frozen=True, slots=True)

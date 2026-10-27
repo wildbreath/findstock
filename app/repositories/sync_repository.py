@@ -3,9 +3,10 @@
 from __future__ import annotations
 
 import sqlite3
-from datetime import UTC, date, datetime
+from datetime import UTC, date, datetime, timedelta
 from typing import Any
 
+from app.core.errors import SyncAlreadyRunningError
 from app.domain.enums import SyncMode, SyncStatus
 from app.domain.models import SyncProgress
 from app.repositories.database import Database
@@ -48,9 +49,12 @@ class SyncRepository:
         phase: str = "starting",
         message: str | None = None,
     ) -> None:
-        """登记一次同步任务。"""
+        """在同一写事务中检查并占用唯一的运行名额。"""
 
         with self._db.session() as conn:
+            conn.execute("BEGIN IMMEDIATE")
+            if conn.execute("SELECT 1 FROM sync_run WHERE status = 'running' LIMIT 1").fetchone():
+                raise SyncAlreadyRunningError("已有同步任务正在运行或取消中，请等待其退出。")
             conn.execute(
                 """
                 INSERT INTO sync_run (
@@ -79,7 +83,11 @@ class SyncRepository:
             raise ValueError(f"不支持更新的字段: {sorted(unknown)}")
         if not fields:
             return
-        assignments = ", ".join(f"{name} = ?" for name in fields)
+        assignments = ", ".join(
+            f"{name} = CASE WHEN phase = 'cancelling' THEN {name} ELSE ? END"
+            if name in {"phase", "message"} else f"{name} = ?"
+            for name in fields
+        )
         with self._db.session() as conn:
             conn.execute(
                 f"UPDATE sync_run SET {assignments} WHERE run_id = ?",
@@ -97,22 +105,27 @@ class SyncRepository:
         """标记任务结束。"""
 
         with self._db.session() as conn:
-            condition = " AND status = 'running'" if status is SyncStatus.SUCCEEDED else ""
+            conn.execute("BEGIN IMMEDIATE")
+            current = conn.execute("SELECT status, phase FROM sync_run WHERE run_id = ?", (run_id,)).fetchone()
+            if current is None or current["status"] != SyncStatus.RUNNING.value:
+                return
+            if status is SyncStatus.SUCCEEDED and current["phase"] == "cancelling":
+                status = SyncStatus.CANCELLED
+                message = "任务已被用户取消。"
             conn.execute(
                 "UPDATE sync_run SET status = ?, finished_at = ?, message = ?, "
-                "error = ?, phase = ? WHERE run_id = ?" + condition,
+                "error = ?, phase = ? WHERE run_id = ?",
                 (status.value, _now_iso(), message, error, status.value, run_id),
             )
 
     def request_cancel(self, run_id: str) -> bool:
-        """请求取消: 把状态改为 cancelled, 由同步进程在下一个批次边界退出。"""
+        """请求取消，保留运行名额，直到工作进程确认停止。"""
 
         with self._db.session() as conn:
             cursor = conn.execute(
-                "UPDATE sync_run SET status = ?, phase = ?, message = ? "
-                "WHERE run_id = ? AND status = ?",
+                "UPDATE sync_run SET phase = ?, message = ? "
+                "WHERE run_id = ? AND status = ? AND phase != 'cancelling'",
                 (
-                    SyncStatus.CANCELLED.value,
                     "cancelling",
                     "已请求取消, 等待当前批次结束…",
                     run_id,
@@ -154,13 +167,19 @@ class SyncRepository:
 
         with self._db.session() as conn:
             rows = conn.execute(
-                "SELECT run_id, pid FROM sync_run WHERE status = ?",
+                "SELECT run_id, pid, started_at FROM sync_run WHERE status = ?",
                 (SyncStatus.RUNNING.value,),
             ).fetchall()
             stale = [
                 row["run_id"]
                 for row in rows
-                if row["pid"] is not None and not _pid_alive(int(row["pid"]))
+                if (
+                    row["pid"] is not None and not _pid_alive(int(row["pid"]))
+                ) or (
+                    row["pid"] is None
+                    and (_parse_dt(row["started_at"]) or datetime.now(UTC))
+                    < datetime.now(UTC) - timedelta(minutes=2)
+                )
             ]
             if stale:
                 conn.executemany(

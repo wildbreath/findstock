@@ -15,6 +15,7 @@ from app.api.routes import api_router
 from app.container import Container
 from app.core.config import get_settings
 from app.core.logging import configure_logging
+from app.core.request_security import register_request_security
 
 logger = logging.getLogger(__name__)
 
@@ -55,6 +56,7 @@ def create_app() -> FastAPI:
     app.include_router(api_router, prefix="/api")
 
     _mount_frontend(app, settings.web_dir)
+    register_request_security(app, settings)
     logger.info("应用已就绪, 数据库: %s", settings.database_path)
     return app
 

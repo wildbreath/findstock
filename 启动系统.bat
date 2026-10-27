@@ -7,13 +7,18 @@ rem commands. All Chinese messages come from scripts\launcher.py instead.
 setlocal
 
 set "ROOT=%~dp0"
-set "PY=%USERPROFILE%\.cache\codex-runtimes\codex-primary-runtime\dependencies\python\python.exe"
+set "PY=%ROOT%.venv\Scripts\python.exe"
 
 if exist "%PY%" goto run
 
 where python >nul 2>nul
-if errorlevel 1 goto nopython
+if errorlevel 1 goto fallback
 set "PY=python"
+goto run
+
+:fallback
+set "PY=%USERPROFILE%\.cache\codex-runtimes\codex-primary-runtime\dependencies\python\python.exe"
+if not exist "%PY%" goto nopython
 
 :run
 "%PY%" -X utf8 "%ROOT%scripts\launcher.py" %*

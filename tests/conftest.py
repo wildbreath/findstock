@@ -20,6 +20,8 @@ def settings(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Iterator[Settin
     monkeypatch.setenv("FINDSTOCK_DB_PATH", str(data_dir / "test.sqlite3"))
     monkeypatch.setenv("FINDSTOCK_LOG_DIR", str(tmp_path / "logs"))
     monkeypatch.setenv("FINDSTOCK_SYNC_WORKERS", "1")
+    monkeypatch.setenv("FINDSTOCK_ALLOWED_HOSTS", "127.0.0.1,localhost,[::1],testserver")
+    monkeypatch.delenv("FINDSTOCK_ACCESS_TOKEN", raising=False)
     get_settings.cache_clear()
     resolved = get_settings()
     yield resolved

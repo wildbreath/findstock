@@ -32,6 +32,7 @@ from app.domain.conditions import (
     ConditionSpec,
     ScreenStrategy,
     strategy_from_criteria,
+    validate_conditions,
 )
 from app.domain.models import ScreenCriteria, node_symbol
 from app.domain.rules import (
@@ -115,7 +116,7 @@ def _resolve_strategy(payload, container: Container):
                 raise InvalidRequestError(f"未知的条件类型: {item.kind}")
             specs.append(ConditionSpec(kind=item.kind, params=dict(item.params)))
         return (
-            ScreenStrategy(name="自定义条件", conditions=tuple(specs)),
+            ScreenStrategy(name="自定义条件", conditions=validate_conditions(tuple(specs))),
             None,
         )
     if payload.strategy_id is not None:

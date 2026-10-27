@@ -164,7 +164,7 @@ class DataSyncService:
             )
             raise ProviderError(f"无法启动同步进程: {exc}") from exc
 
-        self._sync.update(run_id, pid=process.pid, phase="starting")
+        self._sync.update(run_id, pid=process.pid)
         progress = self._sync.get(run_id)
         assert progress is not None
         logger.info("已启动同步任务 %s (mode=%s, pid=%s)", run_id, mode.value, process.pid)

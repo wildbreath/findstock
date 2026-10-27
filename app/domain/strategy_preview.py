@@ -7,8 +7,7 @@ from datetime import date, timedelta
 from decimal import Decimal, ROUND_CEILING, ROUND_FLOOR
 from math import exp, isfinite, log
 
-from app.core.errors import InvalidRequestError
-from app.domain.conditions import CATALOG_BY_KIND, ConditionSpec, ScreenContext, evaluate_condition
+from app.domain.conditions import ConditionSpec, ScreenContext, evaluate_condition, validate_conditions
 from app.domain.enums import Board, Exchange
 from app.domain.models import DailyBar, ScreenCandidate, ScreenWindow, StockInfo
 from app.domain.rules import is_st_name
@@ -111,26 +110,9 @@ def _solve(ranges: list[_Range], first: int, last: int, margin: float) -> dict[i
 
 
 def build_strategy_preview(conditions: tuple[ConditionSpec, ...]) -> dict:
-    specs = tuple(spec.normalized() for spec in conditions)
+    specs = validate_conditions(conditions)
     if not specs:
         return {"status": "empty", "bars": [], "checks": [], "conflicts": []}
-    for spec in specs:
-        for param in CATALOG_BY_KIND[spec.kind]["params"]:
-            value = spec.params.get(param["name"])
-            if param["type"] == "bool" and value is not None and not isinstance(value, bool):
-                raise InvalidRequestError("包含上下限参数必须为布尔值。")
-            if param["type"] != "number" or value is None:
-                continue
-            if isinstance(value, bool):
-                raise InvalidRequestError("条件参数必须为有限数字。")
-            try:
-                number = Decimal(str(value))
-                valid = number.is_finite() and Decimal(str(param["min"])) <= number <= Decimal(str(param["max"]))
-            except (ValueError, ArithmeticError):
-                valid = False
-            if not valid:
-                raise InvalidRequestError(f"{spec.title()}的{param['label']}超出范围或不是有效数字。")
-
     ranges = []
     first, last = -4, 2
     for index, spec in enumerate(specs):

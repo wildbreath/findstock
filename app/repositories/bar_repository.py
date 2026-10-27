@@ -37,7 +37,9 @@ class BarRepository:
     def __init__(self, database: Database) -> None:
         self._db = database
 
-    def upsert_bars(self, conn: sqlite3.Connection, bars: Iterable[DailyBar]) -> int:
+    def upsert_bars(
+        self, conn: sqlite3.Connection, bars: Iterable[DailyBar], *, replace_price_basis: bool = False
+    ) -> int:
         """批量写入日线行情, 返回写入行数。"""
 
         payload = [_bar_payload(bar) for bar in bars]
@@ -60,24 +62,25 @@ class BarRepository:
                 turnover = COALESCE(excluded.turnover, daily_bar.turnover),
                 pct_chg = excluded.pct_chg,
                 trade_status = excluded.trade_status
-            WHERE excluded.pct_chg IS NOT NULL OR daily_bar.pct_chg IS NULL
-            """,
+            """ + ("" if replace_price_basis else
+                   " WHERE excluded.pct_chg IS NOT NULL OR daily_bar.pct_chg IS NULL"),
             payload,
         )
         return len(payload)
 
     def load_bars_for_dates(
-        self, dates: Sequence[date]
+        self, dates: Sequence[date], codes: Sequence[str] | None = None,
     ) -> dict[str, dict[date, DailyBar]]:
         """一次性取出若干交易日的全部行情, 按 (代码, 日期) 组织。"""
 
-        if not dates:
+        if not dates or codes is not None and not codes:
             return {}
         placeholders = ",".join("?" for _ in dates)
+        code_filter = " AND code IN (" + ",".join("?" for _ in codes) + ")" if codes is not None else ""
         with self._db.session() as conn:
             rows = conn.execute(
-                f"SELECT * FROM daily_bar WHERE trade_date IN ({placeholders})",
-                [d.isoformat() for d in dates],
+                f"SELECT * FROM daily_bar WHERE trade_date IN ({placeholders})" + code_filter,
+                [d.isoformat() for d in dates] + (list(codes) if codes is not None else []),
             ).fetchall()
 
         result: dict[str, dict[date, DailyBar]] = {}

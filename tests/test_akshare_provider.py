@@ -222,12 +222,13 @@ class TestNameHistory:
         monkeypatch.setattr(provider, "_call", lambda *a, **k: frame)
         assert provider.fetch_name_change_history("sh.600082") == ["海泰发展", "ST海泰"]
 
-    def test_returns_empty_on_failure(self, provider: AkshareProvider, monkeypatch) -> None:
+    def test_propagates_failure_so_service_can_keep_cache(self, provider: AkshareProvider, monkeypatch) -> None:
         def boom(*args, **kwargs):
             raise ProviderError("上游挂了")
 
         monkeypatch.setattr(provider, "_call", boom)
-        assert provider.fetch_name_change_history("sh.600082") == []
+        with pytest.raises(ProviderError):
+            provider.fetch_name_change_history("sh.600082")
 
 
 def test_only_confirmed_full_day_suspensions_are_exempt(provider, monkeypatch):

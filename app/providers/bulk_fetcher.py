@@ -130,14 +130,17 @@ class BulkFetcher:
                             tuple(buffer_errors),
                         )
                         buffer_codes, buffer_bars, buffer_errors = [], [], []
+            if buffer_codes:
+                yield FetchChunkResult(
+                    tuple(buffer_codes), tuple(buffer_bars), tuple(buffer_errors)
+                )
+        except GeneratorExit:
+            # 调用方取消或失败时等在途请求退出，再允许下一次同步。
+            pool.shutdown(wait=True, cancel_futures=True)
+            raise
         finally:
             # 不能用 with: 默认的 shutdown(wait=True) 会一直等待被上游挂住的线程。
             pool.shutdown(wait=False, cancel_futures=True)
-
-        if buffer_codes:
-            yield FetchChunkResult(
-                tuple(buffer_codes), tuple(buffer_bars), tuple(buffer_errors)
-            )
 
     def _fetch_sequential(
         self, codes: Sequence[str], start: date, end: date

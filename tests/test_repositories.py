@@ -3,8 +3,13 @@
 from __future__ import annotations
 
 from datetime import date, timedelta
+from concurrent.futures import ThreadPoolExecutor
+from threading import Barrier
+
+import pytest
 
 from app.container import Container
+from app.core.errors import SyncAlreadyRunningError
 from app.domain.enums import SyncMode, SyncStatus
 from tests.factories import make_bar, make_stock
 
@@ -169,8 +174,33 @@ def test_sync_run_cancel_request(container: Container) -> None:
     repo = container.sync_repository
     repo.create_run("run-2", SyncMode.INCREMENTAL)
     assert repo.request_cancel("run-2") is True
-    assert repo.get("run-2").status is SyncStatus.CANCELLED
+    assert repo.get("run-2").status is SyncStatus.RUNNING
+    assert repo.get("run-2").phase == "cancelling"
+    assert repo.running().run_id == "run-2"
     assert repo.request_cancel("run-2") is False
+    with pytest.raises(SyncAlreadyRunningError):
+        repo.create_run("too-early", SyncMode.INCREMENTAL)
+    repo.update("run-2", phase="bars", message="不能覆盖取消请求")
+    assert repo.get("run-2").phase == "cancelling"
+    repo.finish("run-2", SyncStatus.CANCELLED)
+    repo.create_run("after-stop", SyncMode.INCREMENTAL)
+
+
+def test_concurrent_sync_creation_reserves_only_one_slot(container):
+    barrier = Barrier(2)
+
+    def start(run_id):
+        barrier.wait(timeout=5)
+        try:
+            container.sync_repository.create_run(run_id, SyncMode.INCREMENTAL)
+            return "started"
+        except SyncAlreadyRunningError:
+            return "blocked"
+
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        assert sorted(pool.map(start, ["parallel-1", "parallel-2"])) == ["blocked", "started"]
+    with container.database.session() as conn:
+        assert conn.execute("SELECT COUNT(*) FROM sync_run WHERE status = 'running'").fetchone()[0] == 1
 
 
 def test_late_success_does_not_override_cancellation(container: Container) -> None:
@@ -179,6 +209,7 @@ def test_late_success_does_not_override_cancellation(container: Container) -> No
     repo.request_cancel("cancel-before-finish")
     repo.finish("cancel-before-finish", SyncStatus.SUCCEEDED, message="不应覆盖取消")
     assert repo.get("cancel-before-finish").status is SyncStatus.CANCELLED
+    assert repo.running() is None
 
 
 def test_sync_update_rejects_unknown_fields(container: Container) -> None:

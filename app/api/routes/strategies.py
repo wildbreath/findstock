@@ -16,7 +16,7 @@ from app.api.schemas import (
 )
 from app.container import Container
 from app.core.errors import InvalidRequestError, StockNotFoundError
-from app.domain.conditions import CATALOG_BY_KIND, CONDITION_CATALOG, ConditionSpec
+from app.domain.conditions import CATALOG_BY_KIND, CONDITION_CATALOG, ConditionSpec, validate_conditions
 from app.domain.strategy_preview import build_strategy_preview
 
 router = APIRouter(tags=["策略"])
@@ -35,7 +35,7 @@ def _to_specs(conditions: list[StrategyConditionIn]) -> tuple[ConditionSpec, ...
         if item.kind not in CATALOG_BY_KIND:
             raise InvalidRequestError(f"未知的条件类型: {item.kind}")
         specs.append(ConditionSpec(kind=item.kind, params=dict(item.params)))
-    return tuple(specs)
+    return validate_conditions(tuple(specs))
 
 
 @router.get(

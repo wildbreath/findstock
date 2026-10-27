@@ -50,6 +50,8 @@ class Settings:
     request_timeout: float
     request_retries: int
     python_executable: str
+    allowed_hosts: tuple[str, ...] = ("127.0.0.1", "localhost", "[::1]")
+    access_token: str = ""
 
     def ensure_directories(self) -> None:
         """确保数据/日志目录存在。"""
@@ -77,4 +79,9 @@ def get_settings() -> Settings:
         request_timeout=float(os.getenv("FINDSTOCK_REQUEST_TIMEOUT", "20")),
         request_retries=_env_int("FINDSTOCK_REQUEST_RETRIES", 3),
         python_executable=os.getenv("FINDSTOCK_PYTHON") or sys.executable,
+        allowed_hosts=("127.0.0.1", "localhost", "[::1]", *(
+            host.strip() for host in os.getenv("FINDSTOCK_ALLOWED_HOSTS", "").split(",")
+            if host.strip()
+        )),
+        access_token=os.getenv("FINDSTOCK_ACCESS_TOKEN", ""),
     )

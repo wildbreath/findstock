@@ -12,7 +12,7 @@ from app.main import create_app
 
 @pytest.fixture()
 def client(container: Container) -> TestClient:
-    return TestClient(create_app())
+    return TestClient(create_app(), client=("127.0.0.1", 50000))
 
 
 def sheet() -> dict:
@@ -23,7 +23,7 @@ def sheet() -> dict:
 
 
 def test_empty_sheet_and_independent_page(client: TestClient) -> None:
-    assert client.get("/api/review-sheet").json() == {"revision": 0, "dates": [], "hidden_dates": [], "rows": []}
+    assert client.get("/api/review-sheet").json() == {"revision": 0, "dates": [], "hidden_dates": [], "rows": [], "collected_dates": []}
     page = client.get("/review")
     assert page.status_code == 200
     assert 'href="/review" aria-current="page"' in page.text
@@ -40,10 +40,10 @@ def test_text_colors_layout_and_hidden_dates_survive_restart(client: TestClient)
     expected = saved.json()
     assert expected["revision"] == 1
     assert expected["rows"][0]["cells"]["2026-10-22"] == {
-        **payload["rows"][0]["cells"]["2026-10-22"], "kind": "", "highlight": False,
+        **payload["rows"][0]["cells"]["2026-10-22"], "kind": "", "highlight": False, "auto_text": "",
     }
     assert expected["rows"][1]["cells"]["2026-10-23"]["text"] == "股票A\n2板缩量"
-    assert TestClient(create_app()).get("/api/review-sheet").json() == expected
+    assert TestClient(create_app(), client=("127.0.0.1", 50000)).get("/api/review-sheet").json() == expected
     expected["hidden_dates"] = []
     restored = client.put("/api/review-sheet", json=expected).json()
     assert restored["revision"] == 2
@@ -71,10 +71,10 @@ def test_manual_markers_round_trip_and_can_be_removed_without_losing_formats(cli
     response = client.put("/api/review-sheet", json=payload)
     assert response.status_code == 200
     marked = response.json()
-    assert TestClient(create_app()).get("/api/review-sheet").json() == marked
+    assert TestClient(create_app(), client=("127.0.0.1", 50000)).get("/api/review-sheet").json() == marked
     assert marked["rows"][0]["leader"] is True
     first = marked["rows"][0]["cells"]["2026-10-22"]
-    assert first == {**payload["rows"][0]["cells"]["2026-10-22"]}
+    assert first == {**payload["rows"][0]["cells"]["2026-10-22"], "auto_text": ""}
     assert marked["rows"][1]["cells"]["2026-10-23"]["kind"] == "stock"
 
     marked["rows"][0]["leader"] = False
@@ -84,7 +84,7 @@ def test_manual_markers_round_trip_and_can_be_removed_without_losing_formats(cli
     restored = response.json()
     assert restored["rows"][0]["leader"] is False
     assert restored["rows"][0]["cells"]["2026-10-22"] == {
-        **payload["rows"][0]["cells"]["2026-10-22"], "highlight": False,
+        **payload["rows"][0]["cells"]["2026-10-22"], "highlight": False, "auto_text": "",
     }
     assert client.get("/api/review-sheet").json() == restored
 
@@ -110,8 +110,14 @@ def test_stale_page_is_rejected_without_data_loss(client: TestClient) -> None:
     lambda value: value["rows"][0]["cells"]["2026-10-22"].update(kind="leader"),
     lambda value: value["rows"][0]["cells"]["2026-10-22"].update(highlight="yellow"),
     lambda value: value["rows"][0].update(leader="purple"),
+    lambda value: value["rows"][0]["cells"]["2026-10-22"].update(auto_text="字" * 2001),
+    lambda value: value["rows"][0].update(tracking={"code": "bj.830001", "theme": "农业", "entry_date": "2026-10-22"}),
+    lambda value: value["rows"][0].update(stock_code="sh.600002", tracking={"code": "sh.600001", "theme": "农业", "entry_date": "2026-10-22"}),
+    lambda value: value.update(collected_dates=["2026-10-21"]),
     lambda value: value.update(revision=True),
     lambda value: value.update(unrecognized="不能静默丢弃的字段"),
+    lambda value: value["rows"][0].update(stock_code="javascript:alert(1)"),
+    lambda value: value["rows"][0].update(theme="字" * 2001),
 ])
 def test_invalid_edits_leave_saved_sheet_intact(client: TestClient, change) -> None:
     original = client.put("/api/review-sheet", json=sheet()).json()
@@ -127,6 +133,41 @@ def test_simultaneous_saves_only_accept_one_revision(container: Container) -> No
         saved = list(workers.map(lambda _: container.review_repository.save(sheet()), range(2)))
     assert sum(value is not None for value in saved) == 1
     assert container.review_repository.get()["revision"] == 1
+
+
+def test_manual_theme_and_stock_binding_survive_restart(client: TestClient) -> None:
+    payload = sheet()
+    payload["rows"][0].update(theme="人工题材", stock_code="sz.300001")
+    saved = client.put("/api/review-sheet", json=payload)
+    assert saved.status_code == 200
+    loaded = TestClient(create_app(), client=("127.0.0.1", 50000)).get("/api/review-sheet").json()
+    assert loaded == saved.json()
+    assert loaded["rows"][0]["tracking"] is None
+    assert loaded["rows"][0]["theme"] == "人工题材"
+    assert loaded["rows"][0]["stock_code"] == "sz.300001"
+
+
+def test_same_stock_and_date_can_persist_as_independent_theme_records(client: TestClient) -> None:
+    payload = {"revision": 0, "dates": ["2026-10-22", "2026-10-23"], "rows": [
+        {"id": "agriculture", "stock_code": "sh.600001", "theme": "农业", "leader": True, "cells": {
+            "2026-10-22": {"text": "原题材备注", "highlight": True},
+            "2026-10-23": {"text": "甲股", "kind": "stock"},
+        }},
+        {"id": "finance", "stock_code": "sh.600001", "theme": "金融", "cells": {
+            "2026-10-23": {"text": "甲股", "kind": "stock"},
+        }},
+    ]}
+    response = client.put("/api/review-sheet", json=payload)
+    assert response.status_code == 200
+    saved = response.json()
+    loaded = client.get("/api/review-sheet").json()
+    assert loaded == saved
+    loaded["rows"][1]["cells"]["2026-10-22"] = {"text": "第二题材独立备注"}
+    edited = client.put("/api/review-sheet", json=loaded).json()
+    assert edited["rows"][0] == saved["rows"][0]
+    edited["rows"].pop()
+    remaining = client.put("/api/review-sheet", json=edited).json()
+    assert remaining["rows"] == [saved["rows"][0]]
 
 
 def test_date_columns_respect_calendar_and_warn_when_unknown(client: TestClient, container: Container) -> None:

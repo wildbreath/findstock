@@ -21,6 +21,7 @@ from app.domain.conditions import (
     required_listing_days,
     strategy_from_criteria,
     used_offsets,
+    validate_conditions,
 )
 from app.domain.enums import Exchange, RejectionReason, StBasis
 from app.domain.models import (
@@ -86,6 +87,7 @@ class ScreenerService:
         if criteria is not None:
             strategy = strategy_from_criteria(criteria)
         strategy = strategy or DEFAULT_STRATEGY
+        strategy = replace(strategy, conditions=validate_conditions(strategy.conditions))
 
         window = self._calendar.resolve_window(selected_date)
         window = self._expand_window(window, strategy)
@@ -149,7 +151,8 @@ class ScreenerService:
         data_conditions = [item for item in strategy.conditions if item.kind != "not_st"]
         st_conditions = [item for item in strategy.conditions if item.kind == "not_st"]
         decisions: dict[str, StDecision] = {}
-        snapshot_days: dict[date, bool] = {window.anchor: snapshot_available}
+        decision_cache: dict[tuple[str, date], StDecision] = {}
+        snapshot_days = {window.anchor: names_at_d2}
         for index, spec in enumerate(data_conditions + st_conditions):
             survivors: list[ScreenCandidate] = []
             for candidate in alive:
@@ -157,13 +160,20 @@ class ScreenerService:
                 if spec.kind == "not_st":
                     st_day = window.date_at(spec.integer("offset", 0)) or window.anchor
                     if st_day not in snapshot_days:
-                        snapshot_days[st_day] = self._stocks.has_names_on(st_day)
-                    decision = decisions.get(code)
+                        snapshot_days[st_day] = self._stocks.names_on(st_day)
+                    decision = decision_cache.get((code, st_day))
                     if decision is None:
                         decision = self._decide_st(
-                            candidate, st_day, snapshot_days[st_day]
+                            candidate, st_day, snapshot_days[st_day].get(code)
                         )
-                        decisions[code] = decision
+                        decision_cache[code, st_day] = decision
+                    previous = decisions.get(code)
+                    decisions[code] = replace(
+                        decision,
+                        basis=previous.basis if previous and not previous.exact else decision.basis,
+                        exact=decision.exact and (previous.exact if previous else True),
+                        detail=f"{previous.detail}; {decision.detail}" if previous else decision.detail,
+                    )
                     passed = not decision.is_st
                 else:
                     passed = evaluate_condition(spec, candidate, context).passed
@@ -189,7 +199,7 @@ class ScreenerService:
             hits=tuple(hits),
             funnel=_build_funnel(stages),
             rejection_counts=dict(rejections),
-            warnings=self._build_warnings(window.dates, snapshot_available, hits),
+            warnings=self._build_warnings(window.dates, snapshot_available, hits, bool(st_conditions)),
             criteria=criteria,
             strategy=strategy,
             generated_at=datetime.now(UTC),
@@ -342,24 +352,26 @@ class ScreenerService:
         return candidates
 
     def _decide_st(
-        self, candidate: ScreenCandidate, d2: date, snapshot_available: bool
+        self, candidate: ScreenCandidate, d2: date, name_at_day: str | None
     ) -> StDecision:
         """对单只候选股票做 ST 判定。"""
 
         bar = candidate.bars.get(d2)
+        snapshot_available = bool(name_at_day)
         history: tuple[str, ...] = (
             ()
             if snapshot_available
             else tuple(self._name_history.history_for(candidate.stock.code))
         )
-        return decide_st(
+        decision = decide_st(
             board=candidate.stock.board,
-            name_at_d2=candidate.name_at_d2,
+            name_at_d2=name_at_day,
             snapshot_available=snapshot_available,
             name_history=history,
             current_name=candidate.stock.name,
             pct_chg_at_d2=None if bar is None else bar.pct_chg,
         )
+        return replace(decision, detail=f"{d2.isoformat()}: {decision.detail}")
 
     def _collect_hits(
         self,
@@ -401,6 +413,7 @@ class ScreenerService:
         dates: tuple[date, date, date],
         snapshot_available: bool,
         hits: list[ScreenHit],
+        st_checked: bool,
     ) -> tuple[str, ...]:
         """数据完整性与 ST 判定口径提示。"""
 
@@ -416,19 +429,19 @@ class ScreenerService:
                     "该日数据可能不完整, 建议重新执行数据更新。"
                 )
 
+        if not st_checked:
+            return tuple(warnings)
         if not snapshot_available:
             warnings.append(
                 f"本地没有 {dates[2].isoformat()} 当天的股票简称快照, "
                 "ST 判定改用历史简称序列 + 涨跌幅上限推断 (每条结果都标注了依据)。"
             )
-            inferred = sorted(
-                {hit.st_basis.label for hit in hits if not hit.st_exact}
+        inferred = sorted({hit.st_basis.label for hit in hits if not hit.st_exact})
+        if inferred:
+            warnings.append(
+                "部分命中的 ST 判定不是精确口径, 建议人工复核: "
+                + "、".join(inferred)
             )
-            if inferred:
-                warnings.append(
-                    "部分命中的 ST 判定不是精确口径, 建议人工复核: "
-                    + "、".join(inferred)
-                )
         return tuple(warnings)
 
 

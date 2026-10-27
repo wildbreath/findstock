@@ -1205,11 +1205,22 @@ body.modal-open { overflow: hidden; }
 .modal-tools { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
 
 .chart-compare-picker { margin-top: 14px; padding: 12px; border: 1px solid #cbd5e1; border-radius: 8px; background: #f8fafc; }
+.chart-compare-sources { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 10px; }
+.chart-compare-sources button { min-height: 36px; padding: 6px 14px; border: 1px solid var(--border); border-radius: 6px; background: white; color: var(--text); font: inherit; cursor: pointer; }
+.chart-compare-sources button:hover, .chart-compare-picked:hover { background: #eef2ff; }
+.chart-compare-sources button[aria-pressed="true"] { border-color: var(--primary); background: #eef2ff; color: #3730a3; font-weight: 600; }
+.chart-compare-filters { display: flex; flex-wrap: wrap; gap: 8px 16px; }
+.chart-compare-filters label { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; font-size: 12px; }
+.chart-compare-filters select { max-width: 100%; min-height: 36px; border: 1px solid #cbd5e1; border-radius: 5px; padding: 5px 8px; background: white; color: var(--text); font: inherit; }
+.chart-compare-group { grid-column: 1 / -1; margin: 6px 0 0; font-size: 12px; color: #475569; }
+.chart-compare-picked { margin: 2px; padding: 3px 8px; border: 1px solid #c7d2fe; border-radius: 5px; background: white; color: #3730a3; font: inherit; cursor: pointer; }
 .chart-compare-picker > label { display: block; margin-bottom: 6px; font-size: 13px; font-weight: 600; }
 .chart-compare-picker > input { width: 100%; min-height: 38px; padding: 8px 10px; background: white; color: var(--text); border: 1px solid #cbd5e1; border-radius: 5px; font: inherit; }
 .chart-compare-picker > p { margin: 8px 0; font-size: 12px; color: var(--text-muted); }
 .chart-compare-options { display: grid; grid-template-columns: repeat(auto-fit, minmax(210px, 1fr)); gap: 6px; max-height: 210px; overflow: auto; }
 .chart-compare-options label { display: flex; align-items: center; gap: 8px; padding: 8px; border: 1px solid var(--border); border-radius: 5px; background: white; cursor: pointer; min-width: 0; }
+.chart-compare-options label:hover { border-color: #a5b4fc; }
+.chart-compare-options label:has(input:checked) { border-color: #a5b4fc; background: #eef2ff; }
 .chart-compare-options input { flex-shrink: 0; accent-color: var(--primary); width: 16px; height: 16px; }
 .chart-compare-options small, .chart-compare-item small { color: var(--text-muted); font-size: 11px; font-weight: 400; }
 .chart-compare-options span { overflow-wrap: anywhere; }
@@ -1248,6 +1259,9 @@ body.modal-open { overflow: hidden; }
   #stock-modal { padding: 8px; }
   #stock-modal .modal-panel { padding: 12px; }
   .chart-compare-picker > input { font-size: 16px; }
+  .chart-compare-sources button { flex: 1 0 40%; min-height: 44px; }
+  .chart-compare-filters label { max-width: 100%; flex-wrap: wrap; }
+  .chart-compare-filters select, .chart-compare-picked { min-height: 44px; }
   .chart-compare-options { grid-template-columns: minmax(0, 1fr); }
   .chart-compare-options label, .chart-compare-actions button { min-height: 44px; }
   .chart-relative-readout { display: none; }
@@ -1303,15 +1317,35 @@ body.modal-open { overflow: hidden; }
 }
 
 .chart-tip {
-  position: absolute;
-  background: rgba(15, 23, 42, 0.92);
-  color: #f8fafc;
+  display: flex;
+  flex-wrap: wrap;
+  align-content: center;
+  align-items: center;
+  flex-shrink: 0;
+  gap: 4px 16px;
+  height: 60px;
+  margin: 6px 0;
+  background: #f8fafc;
+  border: 1px solid var(--border);
+  color: var(--text);
   font-size: 12px;
   line-height: 1.55;
-  padding: 8px 10px;
-  border-radius: 8px;
+  font-variant-numeric: tabular-nums;
+  padding: 4px 10px;
+  border-radius: 6px;
   pointer-events: none;
-  max-width: 320px;
+  overflow: hidden;
+}
+.chart-tip > * { white-space: nowrap; }
+.chart-tip strong { max-width: 100%; overflow: hidden; text-overflow: ellipsis; }
+.chart-tip[hidden] { display: flex !important; }
+.chart-tip[hidden] > * { display: none; }
+.chart-tip[hidden]::before { content: "移动鼠标查看当日行情"; color: var(--text-muted); }
+#stock-modal.is-comparing .chart-tip { height: 40px; }
+@media (max-width: 600px) {
+  .chart-tip { height: 104px; gap: 2px 12px; }
+  #stock-modal.is-comparing .chart-tip { height: 84px; }
+  .chart-tip strong { flex-basis: 100%; }
 }
 
 .chart-loading,

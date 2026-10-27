@@ -51,6 +51,21 @@ const CHART_ZOOM_STEP = 1.18;
 const CHART_COMPARE_LIMIT = 12;
 
 let chartState = null;
+let chartModalBackground = [];
+
+function lockChartBackground(root) {
+  chartModalBackground.forEach(node => { node.inert = false; });
+  chartModalBackground = [];
+  for (let branch = root, parent = root.parentElement; parent; branch = parent, parent = parent.parentElement) {
+    for (const sibling of parent.children) {
+      if (sibling !== branch && !sibling.inert) {
+        sibling.inert = true;
+        chartModalBackground.push(sibling);
+      }
+    }
+    if (parent === document.body) break;
+  }
+}
 
 function nm(value, digits = 2) {
   return value === null || value === undefined || Number.isNaN(value)
@@ -60,7 +75,14 @@ function nm(value, digits = 2) {
 
 function chartRoot() {
   let root = document.getElementById("stock-modal");
-  if (root) return root;
+  const host = document.fullscreenElement || document.body;
+  if (root) {
+    if (root.parentElement !== host) {
+      host.appendChild(root);
+      if (!root.hidden) lockChartBackground(root);
+    }
+    return root;
+  }
 
   root = document.createElement("div");
   root.id = "stock-modal";
@@ -86,9 +108,19 @@ function chartRoot() {
     `<button id="chart-close" class="btn" type="button">关闭</button>` +
     `</div></div>` +
     `<section id="chart-compare-picker" class="chart-compare-picker" aria-label="选择叠加个股" hidden>` +
+    `<div class="chart-compare-sources" role="group" aria-label="选股来源">` +
+    `<button type="button" data-compare-source="current" aria-pressed="true">当前列表</button>` +
+    `<button type="button" data-compare-source="watchlist" aria-pressed="false">自选分类</button>` +
+    `<button type="button" data-compare-source="ladder" aria-pressed="false">连板天梯</button>` +
+    `<button type="button" data-compare-source="market" aria-pressed="false">全市场搜索</button></div>` +
+    `<div class="chart-compare-filters">` +
+    `<label id="chart-compare-category-field" hidden>自选分类 <select id="chart-compare-category"></select></label>` +
+    `<label id="chart-compare-date-field" hidden>天梯日期 <select id="chart-compare-date"></select></label>` +
+    `<label id="chart-compare-height-field" hidden>连板高度 <select id="chart-compare-height"></select></label></div>` +
     `<label for="chart-compare-search">搜索个股</label>` +
-    `<input id="chart-compare-search" type="search" maxlength="80" placeholder="输入名称或代码，可勾选多只" autocomplete="off" aria-controls="chart-compare-options">` +
+    `<input id="chart-compare-search" type="search" maxlength="80" placeholder="在当前列表中筛选名称或代码" autocomplete="off" aria-controls="chart-compare-options">` +
     `<p id="chart-compare-status" role="status"></p>` +
+    `<button id="chart-compare-retry" class="btn btn-mini" type="button" hidden>重新读取</button>` +
     `<div id="chart-compare-options" class="chart-compare-options"></div>` +
     `<div class="chart-compare-actions"><span id="chart-compare-selection"></span>` +
     `<button id="chart-compare-add" class="btn btn-primary" type="button" disabled>添加所选</button></div></section>` +
@@ -100,13 +132,13 @@ function chartRoot() {
     `<button type="button" data-compare-scale="shared" aria-pressed="false">统一刻度</button></div>` +
     `<span id="chart-compare-scale-note"></span></div>` +
     `<div id="chart-comparisons"></div>` +
+    `<div class="chart-tip" id="chart-tip" aria-label="光标行情" hidden></div>` +
     `<div class="chart-stage" id="chart-stage">` +
     `<div id="chart-canvas" class="chart-canvas"></div>` +
-    `<div class="chart-tip" id="chart-tip" hidden></div>` +
     `</div>` +
     `<p class="chart-note" id="chart-note"></p>` +
     `</div>`;
-  document.body.appendChild(root);
+  host.appendChild(root);
 
   root.addEventListener("click", (event) => {
     if (event.target === root) closeStockChart();
@@ -124,6 +156,21 @@ function chartRoot() {
   root.querySelector("#chart-next").addEventListener("click", () => stepStock(1));
   root.querySelector("#chart-compare-toggle").addEventListener("click", toggleChartComparePicker);
   root.querySelector("#chart-compare-search").addEventListener("input", searchChartComparisons);
+  root.querySelector(".chart-compare-sources").addEventListener("click", (event) => {
+    const button = event.target.closest("[data-compare-source]");
+    if (button) loadChartCompareSource(button.dataset.compareSource);
+  });
+  root.querySelector("#chart-compare-category").addEventListener("change", searchChartComparisons);
+  root.querySelector("#chart-compare-height").addEventListener("change", searchChartComparisons);
+  root.querySelector("#chart-compare-date").addEventListener("change", (event) => loadChartCompareSource("ladder", event.target.value));
+  root.querySelector("#chart-compare-retry").addEventListener("click", () => loadChartCompareSource(chartState.compareSource,
+    chartState.compareSource === "ladder" ? root.querySelector("#chart-compare-date").value : ""));
+  root.querySelector("#chart-compare-selection").addEventListener("click", (event) => {
+    const button = event.target.closest("[data-compare-unselect]");
+    if (!button || !chartState) return;
+    chartState.compareDraft.delete(button.dataset.compareUnselect);
+    renderChartCompareOptions(chartState.compareOptions);
+  });
   root.querySelector("#chart-compare-options").addEventListener("change", (event) => {
     const item = chartState?.compareOptions.find(item => item.code === event.target.value);
     if (!item) return;
@@ -179,11 +226,23 @@ function chartRoot() {
 
 function onDocumentKeydown(event) {
   if (!chartState) return;
-  if (event.target.closest?.("input, textarea, select, [contenteditable=true]")) return;
+  if (event.key === "Tab") {
+    const root = document.getElementById("stock-modal");
+    const controls = [...root.querySelectorAll("button:not(:disabled), input:not(:disabled), select:not(:disabled), textarea:not(:disabled), a[href], [tabindex]")]
+      .filter(node => node.tabIndex >= 0 && node.getClientRects().length);
+    const first = controls[0], last = controls.at(-1);
+    if (!root.contains(document.activeElement) || event.shiftKey && document.activeElement === first || !event.shiftKey && document.activeElement === last) {
+      event.preventDefault();
+      (event.shiftKey ? last : first)?.focus({preventScroll: true});
+    }
+    return;
+  }
   if (event.key === "Escape") {
+    event.preventDefault();
     closeStockChart();
     return;
   }
+  if (event.target.closest?.("input, textarea, select, [contenteditable=true]")) return;
   // ← / → 在当前列表里切换到上一个 / 下一个股票
   if (event.key === "ArrowLeft") {
     event.preventDefault();
@@ -212,6 +271,7 @@ async function openStockChart(code, options = {}) {
   }
   const datedIndex = list.findIndex((entry) => entry.code === code && entry.date === options.sourceDate);
   chartState = {
+    returnFocus: chartState?.returnFocus || document.activeElement,
     code,
     name: options.name || "",
     list,
@@ -237,9 +297,12 @@ async function openStockChart(code, options = {}) {
     onWatchChange: options.onWatchChange || null,
     comparisons: new Map(), compareDraft: new Map(), compareOptions: [], compareSearchToken: 0,
     compareScale: "independent",
-    timeline: null, watchItems: [],
+    timeline: null,
+    compareSource: "current", compareSourceItems: [], compareSourceToken: 0,
   };
   root.hidden = false;
+  lockChartBackground(root);
+  root.querySelector("#chart-close").focus({preventScroll: true});
   root.classList.remove("is-comparing");
   root.querySelector(".modal-panel").scrollTop = 0;
   document.body.classList.add("modal-open");
@@ -259,12 +322,16 @@ async function openStockChart(code, options = {}) {
 }
 
 function closeStockChart() {
+  const returnFocus = chartState?.returnFocus;
   clearTimeout(chartState?.compareSearchTimer);
   const root = document.getElementById("stock-modal");
   if (root) root.hidden = true;
+  chartModalBackground.forEach(node => { node.inert = false; });
+  chartModalBackground = [];
   document.body.classList.remove("modal-open");
   document.removeEventListener("keydown", onDocumentKeydown);
   chartState = null;
+  if (returnFocus?.isConnected) returnFocus.focus({preventScroll: true});
 }
 
 async function loadChartData(options = {}) {
@@ -380,7 +447,6 @@ async function refreshChartWatch() {
   try {
     const payload = await api("/api/watchlist");
     if (chartState !== current) return;
-    chartState.watchItems = payload.items || [];
     chartState.watched = (payload.codes || []).includes(chartState.code);
     updateChartStar();
   } catch (error) {
@@ -452,20 +518,78 @@ function toggleChartComparePicker() {
   picker.hidden = !picker.hidden;
   root.querySelector("#chart-compare-toggle").setAttribute("aria-expanded", String(!picker.hidden));
   if (!picker.hidden) {
-    root.querySelector("#chart-compare-search").value = "";
-    searchChartComparisons();
+    loadChartCompareSource(chartState.compareSource);
     root.querySelector("#chart-compare-search").focus();
   }
   if (chartState?.comparisons.size) redrawChart();
+}
+
+async function loadChartCompareSource(source, day = "") {
+  if (!chartState) return;
+  const current = chartState, token = ++current.compareSourceToken;
+  const root = chartRoot();
+  current.compareSource = source;
+  current.compareSourceItems = [];
+  current.compareSourceStatus = "正在读取股票列表…";
+  clearTimeout(current.compareSearchTimer);
+  ++current.compareSearchToken;
+  root.querySelector("#chart-compare-search").value = "";
+  root.querySelector("#chart-compare-search").placeholder = source === "market" ? "输入名称或代码，搜索全市场" : "在所选来源中筛选名称或代码";
+  root.querySelector("#chart-compare-category-field").hidden = source !== "watchlist";
+  root.querySelector("#chart-compare-date-field").hidden = source !== "ladder";
+  root.querySelector("#chart-compare-height-field").hidden = source !== "ladder";
+  root.querySelector("#chart-compare-retry").hidden = true;
+  for (const id of ["category", "date", "height"]) root.querySelector(`#chart-compare-${id}`).disabled = true;
+  root.querySelectorAll("[data-compare-source]").forEach(button => button.setAttribute("aria-pressed", String(button.dataset.compareSource === source)));
+  searchChartComparisons();
+  try {
+    if (source === "current" || source === "market") {
+      current.compareSourceItems = source === "current" ? current.list : [];
+      current.compareSourceStatus = source === "current" ? "当前页面列表，保持原有顺序" : "输入名称或代码搜索全市场";
+    } else {
+      const payload = await api(source === "watchlist" ? "/api/watchlist" : `/api/stock-ladder${day ? `?date=${encodeURIComponent(day)}` : ""}`);
+      if (chartState !== current || token !== current.compareSourceToken) return;
+      current.compareSourceItems = payload.items || [];
+      if (source === "watchlist") {
+        root.querySelector("#chart-compare-category").innerHTML = `<option value="all">全部分类</option>` +
+          (payload.categories || []).map(category => `<option value="${category.id}">${escapeHtml(category.name)}（${category.count}）</option>`).join("") +
+          `<option value="uncategorized">未分类</option>`;
+        root.querySelector("#chart-compare-category").disabled = false;
+        current.compareSourceStatus = "按自选分类选择，可跨分类勾选";
+      } else {
+        root.querySelector("#chart-compare-date").innerHTML = [...new Set([payload.trade_date, ...(payload.trading_days || [])])].sort().reverse()
+          .map(date => `<option value="${escapeHtml(date)}">${escapeHtml(date)}</option>`).join("");
+        root.querySelector("#chart-compare-date").value = payload.trade_date;
+        root.querySelector("#chart-compare-height").innerHTML = `<option value="all">全部高度</option>` +
+          [...new Set(current.compareSourceItems.map(item => item.consecutive))].sort((a, b) => b - a)
+            .map(height => `<option value="${height}">${height === 1 ? "首板" : `${height} 连板`}</option>`).join("");
+        root.querySelector("#chart-compare-date").disabled = false;
+        root.querySelector("#chart-compare-height").disabled = false;
+        current.compareSourceStatus = `${payload.trade_date} · 按连板高度从高到低排列${payload.stale ? " · 旧快照" : ""}`;
+      }
+    }
+  } catch (error) {
+    if (chartState !== current || token !== current.compareSourceToken) return;
+    current.compareSourceStatus = `读取失败：${error.message}`;
+    root.querySelector("#chart-compare-retry").hidden = false;
+  }
+  if (chartState === current && token === current.compareSourceToken) searchChartComparisons();
 }
 
 function renderChartCompareOptions(items) {
   const unique = new Map();
   items.forEach(item => { if (item && /^(sh|sz)\.\d{6}$/.test(item.code)) unique.set(item.code, item); });
   chartState.compareOptions = [...unique.values()].filter(item => item.code !== chartState.code);
+  const category = chartRoot().querySelector("#chart-compare-category").value;
+  let previousGroup = null;
   chartRoot().querySelector("#chart-compare-options").innerHTML = chartState.compareOptions.map(item => {
     const added = chartState.comparisons.has(item.code);
-    return `<label><input type="checkbox" value="${item.code}" ${added ? "disabled checked" : chartState.compareDraft.has(item.code) ? "checked" : ""}>` +
+    const watchCategory = (item.categories || []).find(entry => String(entry.id) === category) || item.categories?.[0];
+    const group = chartState.compareSource === "ladder" ? (item.consecutive === 1 ? "首板" : `${item.consecutive} 连板`) :
+      chartState.compareSource === "watchlist" ? watchCategory?.name || "未分类" : "";
+    const heading = group && group !== previousGroup ? `<h4 class="chart-compare-group">${escapeHtml(group)}</h4>` : "";
+    previousGroup = group;
+    return heading + `<label><input type="checkbox" value="${item.code}" ${added ? "disabled checked" : chartState.compareDraft.has(item.code) ? "checked" : ""}>` +
       `<span>${escapeHtml(item.name || item.code)} <small>${item.code}${added ? " · 已叠加" : ""}</small></span></label>`;
   }).join("");
   updateChartCompareSelection();
@@ -473,8 +597,8 @@ function renderChartCompareOptions(items) {
 
 function updateChartCompareSelection() {
   const selected = [...chartState.compareDraft.values()];
-  chartRoot().querySelector("#chart-compare-selection").textContent = selected.length ?
-    `已选 ${selected.length} 只：${selected.map(item => item.name || item.code).join("、")}` : "可选择多只，添加后上下排列";
+  chartRoot().querySelector("#chart-compare-selection").innerHTML = selected.length ?
+    `已选 ${selected.length} 只 ` + selected.map(item => `<button type="button" class="chart-compare-picked" data-compare-unselect="${item.code}" aria-label="取消选择${escapeHtml(item.name || item.code)}">${escapeHtml(item.name || item.code)} ×</button>`).join("") : "可跨来源勾选，含主图最多 12 只";
   chartRoot().querySelector("#chart-compare-add").disabled = !selected.length;
 }
 
@@ -484,9 +608,27 @@ function searchChartComparisons() {
   const query = chartRoot().querySelector("#chart-compare-search").value.trim();
   const status = chartRoot().querySelector("#chart-compare-status");
   clearTimeout(current.compareSearchTimer);
+  if (current.compareSource !== "market") {
+    const category = chartRoot().querySelector("#chart-compare-category").value;
+    const height = chartRoot().querySelector("#chart-compare-height").value;
+    const items = current.compareSourceItems.filter(item => {
+      if (current.compareSource === "watchlist" && category !== "all") {
+        const categories = item.categories || [];
+        if (category === "uncategorized" ? categories.length : !categories.some(entry => String(entry.id) === category)) return false;
+      }
+      if (current.compareSource === "ladder" && height !== "all" && String(item.consecutive) !== height) return false;
+      return !query || `${item.name || ""} ${item.code}`.toLowerCase().includes(query.toLowerCase());
+    });
+    if (current.compareSource === "ladder") items.sort((a, b) => b.consecutive - a.consecutive || a.code.localeCompare(b.code));
+    if (current.compareSource === "watchlist") items.sort((a, b) =>
+      (a.categories?.[0]?.name || "未分类").localeCompare(b.categories?.[0]?.name || "未分类", "zh-CN") || a.code.localeCompare(b.code));
+    renderChartCompareOptions(items);
+    status.textContent = `${current.compareSourceStatus} · ${current.compareOptions.length} 只可选${!current.compareOptions.length ? "，可切换分类、日期或来源" : ""}`;
+    return;
+  }
   if (!query) {
-    status.textContent = "从当前列表、自选股中勾选，或输入名称 / 代码搜索全市场。";
-    renderChartCompareOptions([...(current.list || []), ...current.watchItems]);
+    status.textContent = "输入名称或代码搜索全市场，可与其他来源混选。";
+    renderChartCompareOptions([]);
     return;
   }
   status.textContent = "正在搜索…";
@@ -651,7 +793,6 @@ function renderRelativeChart(width, height) {
 
 function updateChartCompareAxis() {
   const root = chartRoot(), stage = root.querySelector("#chart-stage");
-  root.querySelector("#chart-tip").hidden = true;
   const axis = stage.querySelector(".chart-shared-axis");
   if (axis && chartState?.layout) {
     axis.setAttribute("transform", `translate(0 ${Math.min(0, stage.scrollTop + stage.clientHeight - chartState.layout.geometry.height)})`);
@@ -685,7 +826,7 @@ function redrawChart() {
   const width = Math.max(comparing ? 280 : 640, canvas.clientWidth || 960);
   if (comparing) {
     const panel = root.querySelector(".modal-panel");
-    const otherHeight = [...panel.children].filter(node => node !== stage && !node.hidden).reduce((sum, node) => {
+    const otherHeight = [...panel.children].filter(node => node !== stage && (!node.hidden || node.id === "chart-tip")).reduce((sum, node) => {
       const style = getComputedStyle(node);
       return sum + node.getBoundingClientRect().height + (parseFloat(style.marginTop) || 0) + (parseFloat(style.marginBottom) || 0);
     }, 0);
@@ -701,6 +842,8 @@ function redrawChart() {
       chartState.highlightScreenDate ? chartState.screenDate : null);
   }
   updateCrosshair();
+  if (chartState.hoverIndex == null) root.querySelector("#chart-tip").hidden = true;
+  else showChartTip(chartState.hoverIndex);
   loadChartComparisons();
 }
 
@@ -1007,10 +1150,10 @@ function onChartHover(event) {
     updateCrosshair();
     renderLegend();
   }
-  showChartTip(index, event);
+  showChartTip(index);
 }
 
-function showChartTip(index, event) {
+function showChartTip(index) {
   const root = chartRoot();
   const tip = root.querySelector("#chart-tip");
   const entry = chartState.comparisons.get(chartState.hoverCode);
@@ -1018,31 +1161,17 @@ function showChartTip(index, event) {
   if (!bar) return;
   const rows = [
     `<strong>${escapeHtml(entry?.payload?.name || chartState.payload.name)} · ${bar.trade_date}</strong>`,
-    `开 ${nm(bar.open)} · 高 ${nm(bar.high)} · 低 ${nm(bar.low)} · 收 ${nm(bar.close)}`,
-    `涨跌幅 ${bar.pct_chg === null ? "—" : `${nm(bar.pct_chg)}%`} · 成交量 ${formatVolume(bar.volume)}`,
-    Object.entries(bar.ma || {})
-      .map(([window, value]) => `MA${window} ${nm(value)}`)
-      .join(" · "),
+    `<span>收盘 ${nm(bar.close)}</span>`,
+    `<span>日涨跌 ${bar.pct_chg == null ? "—" : `${nm(bar.pct_chg)}%`}</span>`,
   ];
   if (chartState.comparisons.size) {
     const layout = entry?.layout || chartState.layout;
-    rows.push(`基准 ${layout.baseDate || "—"} · 区间相对涨跌幅 ${bar.close == null || !layout.baseClose ? "—" : `${nm((bar.close / layout.baseClose - 1) * 100)}%`}`);
+    rows.push(`<span>区间涨跌 ${bar.close == null || !layout.baseClose ? "—" : `${nm((bar.close / layout.baseClose - 1) * 100)}%`}</span>`);
+  } else {
+    rows.push(`<span>开 ${nm(bar.open)} · 高 ${nm(bar.high)} · 低 ${nm(bar.low)}</span>`, `<span>量 ${formatVolume(bar.volume)}</span>`);
   }
-  tip.innerHTML = rows.join("<br>");
+  tip.innerHTML = rows.join("");
   tip.hidden = false;
-
-  const stage = root.querySelector("#chart-stage");
-  const stageRect = stage.getBoundingClientRect();
-  const left = Math.min(
-    Math.max(8, event.clientX - stageRect.left + 16),
-    Math.max(8, stageRect.width - tip.offsetWidth - 8)
-  );
-  const top = Math.min(
-    Math.max(8, event.clientY - stageRect.top + 14),
-    Math.max(8, stageRect.height - tip.offsetHeight - 8)
-  );
-  tip.style.left = `${left}px`;
-  tip.style.top = `${top + stage.scrollTop}px`;
 }
 
 /* --- 缩放 / 平移 / 切换股票 --------------------------------------------- */
@@ -1165,6 +1294,7 @@ async function stepStock(delta) {
   chartState.layout = null;
   chartState.drag = null;
   chartState.compareDraft = new Map();
+  chartRoot().querySelector("#chart-tip").hidden = true;
   chartRoot().querySelector("#chart-compare-picker").hidden = true;
   chartRoot().querySelector("#chart-compare-toggle").setAttribute("aria-expanded", "false");
   chartRoot().querySelector("#chart-comparisons").innerHTML = "";

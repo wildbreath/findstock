@@ -7,11 +7,13 @@ import sqlite3
 from datetime import UTC, datetime
 from decimal import Decimal
 
+from app.core.errors import InvalidRequestError
 from app.domain.conditions import (
     CATALOG_BY_KIND,
     DEFAULT_STRATEGY,
     ConditionSpec,
     ScreenStrategy,
+    validate_conditions,
 )
 from app.repositories.database import Database
 
@@ -35,7 +37,7 @@ def dump_conditions(conditions: tuple[ConditionSpec, ...]) -> str:
     return json.dumps(
         [
             {"kind": spec.kind, "params": _jsonable(spec.default_params())}
-            for spec in conditions
+            for spec in validate_conditions(conditions)
         ],
         ensure_ascii=False,
     )
@@ -130,7 +132,7 @@ class StrategyRepository:
 
         cleaned = name.strip()
         if not cleaned:
-            raise ValueError("策略名称不能为空")
+            raise InvalidRequestError("策略名称不能为空")
         now = _now_iso()
         with self._db.session() as conn:
             conn.execute(
@@ -162,7 +164,7 @@ class StrategyRepository:
             return None
         new_name = (name or current.name).strip()
         if not new_name:
-            raise ValueError("策略名称不能为空")
+            raise InvalidRequestError("策略名称不能为空")
         new_conditions = current.conditions if conditions is None else conditions
         with self._db.session() as conn:
             conn.execute(

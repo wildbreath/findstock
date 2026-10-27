@@ -12,6 +12,8 @@ const clone = value => JSON.parse(JSON.stringify(value));
     const dates = ['2026-10-19', '2026-10-20', '2026-10-21', '2026-10-22', '2026-10-23', '2026-10-26', '2026-10-27', '2026-10-28', '2026-10-29', '2026-10-30'];
     let saved = {revision: 0, dates, hidden_dates: [], rows: Array.from({length: 12}, (_, i) => ({id: `row-${i}`, cells: {}}))};
     let failSave = false, failLoad = false, heldSave = null;
+    const chartRequests = [];
+    let failChart = false;
     page.on('pageerror', error => errors.push(error.message));
     page.on('dialog', dialog => dialog.accept());
     await page.route('**/*', async route => {
@@ -22,6 +24,15 @@ const clone = value => JSON.parse(JSON.stringify(value));
         if (fs.existsSync(`web/${file}`)) return route.fulfill({contentType: file.endsWith('.css') ? 'text/css' : 'text/javascript', body: fs.readFileSync(`web/${file}`, 'utf8')});
       }
       if (path === '/api/review-sheet' && request.method() === 'GET') return route.fulfill(failLoad ? {status: 500, json: {error: {message: '读取暂时失败'}}} : {json: clone(saved)});
+      if (path === '/api/review-sheet/collect-dates') return route.fulfill({json: {dates}});
+      if (path === '/api/stocks/search') return route.fulfill({json: [{code: 'sz.300001', name: '手工甲'}]});
+      if (path === '/api/watchlist') return route.fulfill({json: {items: [], codes: []}});
+      if (path.endsWith('/chart')) {
+        const code = path.split('/')[3];
+        chartRequests.push(code);
+        if (failChart) return route.fulfill({status: 404, json: {error: {message: '本地没有行情，请先下载'}}});
+        return route.fulfill({json: {code, name: code === 'sz.300001' ? '手工甲' : '自动乙', board_label: '主板', ma_windows: [5, 10, 20, 60], bars: dates.map(trade_date => ({trade_date, open: 10, close: 11, high: 12, low: 9, volume: 100000, pct_chg: 10, ma: {5: 10, 10: 10, 20: 10, 60: 10}}))}});
+      }
       if (path === '/api/review-sheet' && request.method() === 'PUT') {
         const payload = request.postDataJSON();
         if (heldSave) { const hold = heldSave; heldSave = null; await hold; }
@@ -57,7 +68,7 @@ const clone = value => JSON.parse(JSON.stringify(value));
     await page.goto('http://localhost/review');
     await page.waitForFunction(() => reviewLoaded);
     assert.ok((await page.locator('.page-header').boundingBox()).height < 65, 'The title uses a compact single line');
-    assert.ok((await page.locator('#review-controls').boundingBox()).height < 160, 'The editing tools use a compact desktop layout');
+    assert.ok((await page.locator('#review-controls').boundingBox()).height < 230, 'Editing tools and theme navigation leave room for the sheet');
     assert.deepEqual(await page.evaluate(() => reviewDays), dates, 'Date columns stay in ascending order');
     assert.equal(await page.evaluate(() => reviewAnchor.c), dates.length - 1, 'The latest date is selected on opening');
     const initialScroll = await page.locator('#review-scroll').evaluate(node => ({
@@ -240,13 +251,15 @@ const clone = value => JSON.parse(JSON.stringify(value));
     await cell(2, 2).press('Tab');
     assert.equal(await cell(2, 3).evaluate(node => document.activeElement === node), true);
     await page.locator('#review-insert-row').click();
-    assert.equal(await page.locator('#review-grid tbody tr').count(), 13);
+    assert.equal(await page.locator('#review-grid tbody tr[data-review-row]').count(), 13);
     assert.equal(await page.evaluate(() => reviewAnchor.c), 3, 'Editing and inserting rows does not jump to the newest date');
     await page.locator('#review-undo').click();
-    assert.equal(await page.locator('#review-grid tbody tr').count(), 12);
+    assert.equal(await page.locator('#review-grid tbody tr[data-review-row]').count(), 12);
     await page.locator('[data-row="3"]').click();
+    const retained = await page.evaluate(() => reviewSheet.rows.filter((row, index) => index !== 3 && reviewRowOccupied(row)).map(row => row.id).sort());
     await page.locator('#review-delete-row').click();
-    assert.equal(await page.locator('#review-grid tbody tr').count(), 11);
+    assert.equal(await page.locator('#review-grid tbody tr[data-review-row]').count(), retained.length);
+    assert.deepEqual(await page.evaluate(() => reviewSheet.rows.map(row => row.id).sort()), retained, 'Deletion removes only the selected records and redundant empty rows');
     await page.locator('#review-undo').click();
     assert.equal(await cell(3, 2).innerText(), '金融');
 
@@ -288,6 +301,7 @@ const clone = value => JSON.parse(JSON.stringify(value));
     assert.equal(await cell(1, 3).evaluate(node => getComputedStyle(node).color), 'rgb(255, 241, 118)',
       'Removing the leader preserves manually highlighted text');
     const rowsBeforeMove = await page.evaluate(() => JSON.stringify(reviewSheet.rows));
+    const themesBeforeMove = await page.evaluate(() => reviewThemeGroups().map(group => ({theme: group.theme, ids: group.indices.map(r => reviewSheet.rows[r].id)})));
     const movedRow = await page.evaluate(() => JSON.stringify(reviewSheet.rows[1]));
     await cell(1, 11).click();
     await page.locator('#review-row-down').click();
@@ -295,7 +309,11 @@ const clone = value => JSON.parse(JSON.stringify(value));
       'Moving a stock keeps its row identity, older dates, cell colors and manual markers');
     assert.equal(await page.evaluate(() => reviewAnchor.r), 2);
     await page.locator('#review-row-up').click();
-    assert.equal(await page.evaluate(() => JSON.stringify(reviewSheet.rows)), rowsBeforeMove);
+    const rowsAfterMove = await page.evaluate(() => reviewSheet.rows);
+    const withoutTheme = rows => rows.map(({theme, ...row}) => row);
+    assert.deepEqual(withoutTheme(rowsAfterMove), withoutTheme(JSON.parse(rowsBeforeMove)));
+    assert.deepEqual(await page.evaluate(() => reviewThemeGroups().map(group => ({theme: group.theme, ids: group.indices.map(r => reviewSheet.rows[r].id)}))), themesBeforeMove,
+      'Moving legacy rows preserves their effective classifications while making inherited themes explicit');
     const beforePaste = await page.evaluate(() => reviewBody());
     await cell(0, 11).click(); await paste('超出\t范围');
     assert.equal(await page.evaluate(() => reviewBody()), beforePaste, 'Oversized paste must not partially modify data');
@@ -339,7 +357,7 @@ const clone = value => JSON.parse(JSON.stringify(value));
     await scroll.evaluate(node => { node.scrollLeft = node.scrollWidth; });
     const sticky = await cell(0, 0).evaluate(node => getComputedStyle(node.parentElement).position);
     assert.notEqual(sticky, 'sticky', 'Theme cells must scroll with their date columns');
-    const rowIdentity = page.locator('#review-grid [data-row="1"]');
+    const rowIdentity = page.locator('#review-grid tr[data-review-row="1"] .review-row-label');
     assert.match(await rowIdentity.innerText(), /股票A/);
     assert.match(await rowIdentity.innerText(), /农业/);
     const fixedRow = await rowIdentity.boundingBox(), visibleGrid = await scroll.boundingBox();
@@ -382,8 +400,154 @@ const clone = value => JSON.parse(JSON.stringify(value));
     saved = {revision: 0, dates: [], hidden_dates: [], rows: []};
     await page.locator('#review-reload').click();
     await page.waitForFunction(() => reviewLoaded && !reviewDirty && !reviewSaving);
-    assert.equal(await page.locator('#review-grid tbody tr').count(), 12, 'First use must offer blank editable rows');
+    assert.equal(await page.locator('#review-grid tbody tr[data-review-row]').count(), 12, 'First use must offer blank editable rows');
     assert.ok(saved.dates.length > 0);
+
+    // Use a separate fixture for classification, compacting, zoom memory and chart links.
+    await page.setViewportSize({width: 1280, height: 800});
+    saved = {revision: saved.revision + 1, dates, hidden_dates: [dates[0]], rows: [
+      {id: 'a1', theme: '农业', cells: {[dates[0]]: {text: '农业', kind: 'theme'}}},
+      {id: 'blank', cells: {}},
+      {id: 'b1', tracking: {code: 'sh.600001', theme: '金融', entry_date: dates[2], stopped: true}, leader: true,
+        cells: {[dates[0]]: {text: '金融', auto_text: '金融', kind: 'theme'}, [dates[1]]: {text: '自动乙', kind: 'stock'}, [dates[2]]: {text: '隐藏描述', highlight: true}}},
+      {id: 'a2', theme: '农业', cells: {[dates[2]]: {text: '+5%', auto_text: '+5%'}}},
+      {id: 'manual', cells: {[dates[1]]: {text: '手工甲', kind: 'stock'}}},
+      {id: 'styled', cells: {[dates[0]]: {background: '#ff0000'}}},
+    ]};
+    const original = clone(saved.rows);
+    await page.reload();
+    await page.waitForFunction(() => reviewLoaded);
+    await page.locator('[data-row="2"]').click();
+    await page.locator('#review-theme-edit').click();
+    await page.locator('#review-theme-value').fill(' 农业 ');
+    await page.getByRole('button', {name: '保存并归组'}).click();
+    assert.deepEqual(await page.evaluate(() => reviewSheet.rows.map(row => row.id)), ['a1', 'b1', 'a2', 'manual', 'styled']);
+    assert.equal(await page.evaluate(() => reviewSheet.rows[1].tracking.theme), '农业');
+    assert.equal(await page.evaluate(day => reviewSheet.rows[1].cells[day].text, dates[0]), '农业');
+    assert.equal(await page.evaluate(() => reviewAnchor.r), 1);
+    await page.locator('#review-undo').click();
+    assert.deepEqual(await page.evaluate(() => reviewSheet.rows), original);
+    await page.locator('#review-redo').click();
+    await flush();
+    await page.reload();
+    await page.waitForFunction(() => reviewLoaded);
+    assert.equal(await page.evaluate(() => reviewSheet.rows[1].theme), '农业');
+    assert.deepEqual(await page.evaluate(() => reviewSheet.hidden_dates), [dates[0]]);
+    const beforeDelete = await page.evaluate(() => JSON.stringify(reviewSheet.rows));
+    await page.locator('[data-row="1"]').click();
+    await page.locator('#review-delete-row').click();
+    assert.deepEqual(await page.evaluate(() => reviewSheet.rows.map(row => row.id)), ['a1', 'a2', 'manual', 'styled']);
+    await page.locator('#review-undo').click();
+    assert.equal(await page.evaluate(() => JSON.stringify(reviewSheet.rows)), beforeDelete);
+
+    const options = await page.locator('#review-zoom option').evaluateAll(items => items.map(item => item.value));
+    assert.ok(options.includes('0.5') && options.includes('2') && options.length >= 18);
+    for (const zoom of options) {
+      await page.locator('#review-zoom').selectOption(zoom);
+      const sizes = await page.evaluate(() => ({cell: document.querySelector('.review-cell').getBoundingClientRect().width,
+        tool: document.querySelector('#review-bold').getBoundingClientRect().height,
+        name: document.querySelector('.review-row-label').getBoundingClientRect().width,
+        dock: document.querySelector('.review-dock-content .btn').getBoundingClientRect().height}));
+      assert.ok(Math.abs(sizes.cell - 116 * Number(zoom)) < 1, `Cell scaling at ${zoom}`);
+      assert.ok(Math.abs(sizes.tool - 28 * Number(zoom)) < 1, `Toolbar scaling at ${zoom}`);
+      assert.ok(Math.abs(sizes.name - 150 * Number(zoom)) < 1, `Name scaling at ${zoom}`);
+      assert.ok(Math.abs(sizes.dock - 32 * Number(zoom)) < 1, `Date dock scaling at ${zoom}`);
+    }
+    await page.locator('#review-zoom').selectOption('0.6');
+    await flush();
+    await page.reload();
+    await page.waitForFunction(() => reviewLoaded);
+    assert.equal(await page.locator('#review-zoom').inputValue(), '0.6');
+    await page.locator('#review-overview').click();
+    assert.equal(await page.locator('#review-grid').evaluate(node => getComputedStyle(node).zoom), '1');
+    await page.locator('#review-overview').click();
+    assert.equal(await page.locator('#review-grid').evaluate(node => getComputedStyle(node).zoom), '0.6');
+    await page.locator('#review-zoom-reset').click();
+    assert.equal(await page.locator('#review-zoom').inputValue(), '1');
+
+    await page.locator('[data-chart-row="1"]').scrollIntoViewIfNeeded();
+    await scroll.evaluate(node => { node.scrollLeft = node.scrollWidth; });
+    const beforeChart = await page.evaluate(() => ({left: document.querySelector('#review-scroll').scrollLeft, anchor: {...reviewAnchor}}));
+    const chartName = await page.locator('[data-chart-row="1"]').boundingBox();
+    await page.mouse.click(chartName.x + chartName.width / 2, chartName.y + chartName.height / 2);
+    await page.locator('#stock-modal').waitFor({state: 'visible'});
+    await page.waitForFunction(() => chartState?.payload);
+    assert.equal(chartRequests.at(-1), 'sh.600001');
+    await page.keyboard.press('Escape');
+    assert.deepEqual(await page.evaluate(() => ({left: document.querySelector('#review-scroll').scrollLeft, anchor: {...reviewAnchor}})), beforeChart);
+    assert.equal(await page.locator('[data-chart-row="1"]').evaluate(node => node === document.activeElement), true);
+    await page.locator('[data-chart-row="3"]').click();
+    await page.locator('#review-stock-dialog').waitFor({state: 'visible'});
+    await page.locator('[data-stock-code="sz.300001"]').click();
+    await page.waitForFunction(() => chartState?.payload?.code === 'sz.300001');
+    assert.equal(await page.evaluate(() => reviewSheet.rows.find(row => row.id === 'manual').stock_code), 'sz.300001');
+    assert.equal(await page.evaluate(() => reviewSheet.rows.find(row => row.id === 'manual').tracking), undefined, 'Binding a chart must not enable automatic tracking');
+    await page.locator('#chart-close').click();
+    await flush();
+    await page.reload();
+    await page.waitForFunction(() => reviewLoaded);
+    await page.locator('#review-fullscreen').click();
+    await page.waitForFunction(() => !!document.fullscreenElement);
+    await page.locator('[data-chart-row="3"]').click();
+    await page.waitForFunction(() => chartState?.payload?.code === 'sz.300001');
+    assert.equal(await page.locator('#stock-modal').evaluate(node => document.fullscreenElement.contains(node)), true);
+    await page.locator('#chart-close').click();
+    await page.locator('#review-fullscreen').click();
+    await page.waitForFunction(() => !document.fullscreenElement);
+    failChart = true;
+    await page.locator('[data-chart-row="1"]').click();
+    await page.locator('.chart-error').waitFor();
+    assert.match(await page.locator('.chart-error').innerText(), /本地没有行情/);
+    await page.locator('#chart-close').click();
+
+    // Committing an edited theme may move its row; keyboard navigation follows that record.
+    await page.evaluate(day => {
+      reviewSheet.rows = [
+        {id: 'a0', theme: '农业', cells: {[day]: {text: '农业', kind: 'theme'}}},
+        {id: 'b0', theme: '金融', cells: {[day]: {text: '金融', kind: 'theme'}}},
+        {id: 't', theme: '科技', cells: {[day]: {text: '科技', kind: 'theme'}}},
+        {id: 'a1', theme: '农业', cells: {[day]: {text: '农业', kind: 'theme'}}},
+      ]; reviewAnchor = reviewEnd = {r: 2, c: 0}; reviewRender();
+    }, dates[1]);
+    await cell(2, 0).dblclick(); await cell(2, 0).fill('农业'); await cell(2, 0).press('Enter');
+    assert.deepEqual(await page.evaluate(() => reviewSheet.rows.map(row => row.id)), ['a0', 't', 'a1', 'b0']);
+    assert.equal(await page.evaluate(() => reviewSheet.rows[reviewAnchor.r].id), 'a1', 'Enter moves one row below the record after regrouping');
+    await page.setViewportSize({width: 390, height: 650});
+    await page.locator('#review-zoom').selectOption('2');
+    const dockButtons = await page.locator('#review-scroll-dock button').evaluateAll(buttons => buttons.map(button => ({left: button.getBoundingClientRect().left, right: button.getBoundingClientRect().right})));
+    assert.ok(dockButtons.every(button => button.left >= 0 && button.right <= 391), 'All date controls remain reachable at 200% on a narrow screen');
+    await page.locator('[data-review-scroll="last"]').click();
+    assert.equal(await scroll.evaluate(node => Math.abs(node.scrollLeft - (node.scrollWidth - node.clientWidth)) < 1), true);
+    const dockHeight = await page.locator('#review-scroll-dock').evaluate(node => node.getBoundingClientRect().height);
+    assert.ok(await page.locator('.review-main').evaluate(node => parseFloat(getComputedStyle(node).paddingBottom)) >= dockHeight, 'Page padding follows the wrapped dock height');
+    await page.locator('#review-zoom').selectOption('1');
+    await page.setViewportSize({width: 1280, height: 800});
+    await page.screenshot({path: '.probe/review-updates.png', fullPage: true});
+    await page.evaluate(() => {
+      reviewDays = ['2026-10-22', '2026-10-23', '2026-10-26', '2026-10-27'];
+      reviewSheet.dates = [...reviewDays];
+      reviewSheet.rows = [{id: 'market', cells: Object.fromEntries([
+        {text: '3板 +9.97%', background: '#dc2626'},
+        {text: '+3.25%', background: '#efb7b2'},
+        {text: '-3.25%', background: '#b8d8c4'},
+        {text: '-9.97%', background: '#237b3b'},
+      ].map((value, c) => [reviewDays[c], {...value, auto_text: value.text}]))}];
+      reviewAnchor = reviewEnd = {r: 0, c: 0}; reviewRender();
+    });
+    assert.equal(await cell(0, 0).innerText(), '3板 +9.97%');
+    const marketColors = await page.locator('#review-grid td').evaluateAll(cells => cells.map(td => {
+      const style = getComputedStyle(td);
+      return [style.backgroundColor, style.color];
+    }));
+    assert.deepEqual(marketColors, [
+      ['rgb(220, 38, 38)', 'rgb(255, 255, 255)'],
+      ['rgb(239, 183, 178)', 'rgb(31, 41, 55)'],
+      ['rgb(184, 216, 196)', 'rgb(31, 41, 55)'],
+      ['rgb(35, 123, 59)', 'rgb(255, 255, 255)'],
+    ]);
+    await page.locator('#review-overview').click();
+    assert.equal(await cell(0, 0).innerText(), '3板 +9.97%');
+    await page.screenshot({path: '.probe/review-market-cells.png', fullPage: true});
     assert.deepEqual(errors, []);
     assert.deepEqual(unexpected, []);
     console.log('Review browser checks passed: selection/edit modes, inline paste, cancel, keyboard/drag ranges, context menu, fixed identity, reversible leader/yellow markers, intact row movement, Excel paste/copy, undo/redo, persistence, draft recovery, conflicts, export, zoom and responsive layout.');

@@ -19,7 +19,7 @@
       <a class="side-link" href="/multi-chart"><span class="side-icon" aria-hidden="true">▦</span>多股同列</a>
       <a class="side-link" href="/data"><span class="side-icon" aria-hidden="true">▦</span>数据</a>
     </nav>
-    <p class="sidebar-foot">手工记录 · 按日期复盘<br>板块、个股自由排布</p>
+    <p class="sidebar-foot">按日收录 · 手工复盘<br>题材分堆、持续跟踪</p>
   </aside>
   <div class="app-main">
     <header class="page-header"><div class="wrap review-heading">
@@ -32,6 +32,20 @@
         <p class="review-notice" id="review-notice" role="alert" hidden></p>
         <fieldset id="review-controls" class="review-controls" disabled>
           <legend class="sr-only">复盘表工具</legend>
+          <div class="review-controls-content">
+          <form id="review-collect-form" class="review-toolbar review-collect">
+            <label>收录日期 <input id="review-collect-date" type="date" list="review-collect-dates" required></label>
+            <datalist id="review-collect-dates"></datalist>
+            <button class="btn btn-primary" id="review-collect" type="submit">收录这一天</button>
+            <span id="review-collect-result" role="status" aria-live="polite">一次一天 · 使用已下载的收盘数据</span>
+          </form>
+          <div class="review-toolbar review-view-tools" aria-label="查看与题材排序">
+            <button class="btn" id="review-overview" type="button" aria-pressed="false">整体视图</button>
+            <button class="btn" id="review-theme-sort" type="button">题材排序</button>
+            <label>跳转题材 <select id="review-theme-jump" aria-label="跳转到题材"><option value="">选择题材</option></select></label>
+            <span id="review-summary" role="status"></span>
+            <span class="review-save-state" id="review-view-status" role="status" aria-live="polite"></span>
+          </div>
           <form id="review-range" class="review-toolbar review-range">
             <label>日期从 <input id="review-start" type="date" required></label>
             <label>到 <input id="review-end" type="date" required></label>
@@ -55,11 +69,22 @@
             <button class="btn" data-review-fill="" type="button" title="恢复选中格的默认底色" aria-label="恢复默认底色">默认</button>
             <button class="btn" id="review-bold" type="button" aria-pressed="false"><b>加粗</b></button>
             <button class="btn" id="review-clear-format" type="button">清除格式</button>
-            <span class="review-divider" aria-hidden="true"></span>
-            <button class="btn" id="review-add-row" type="button">＋ 添加行</button>
+          </div>
+          <div class="review-toolbar review-row-tools" aria-label="加入个股与批量行操作">
+            <button class="btn btn-primary" id="review-add-stocks" type="button">＋ 加入个股</button>
+            <button class="btn" id="review-add-row" type="button">新增行…</button>
+            <button class="btn" id="review-insert-above" type="button">上方插入</button>
             <button class="btn" id="review-insert-row" type="button">下方插入</button>
+            <span class="review-divider" aria-hidden="true"></span>
+            <button class="btn" id="review-theme-edit" type="button" disabled>编辑题材</button>
+            <button class="btn" id="review-select-theme" type="button">选择同题材</button>
+            <button class="btn" id="review-clear-row-selection" type="button" disabled>取消多选</button>
+            <span id="review-row-selection" role="status" aria-live="polite"></span>
+            <span class="review-divider" aria-hidden="true"></span>
             <button class="btn" id="review-row-up" type="button" title="选中股票整行上移，保留所有日期和格式">上移</button>
             <button class="btn" id="review-row-down" type="button" title="选中股票整行下移，保留所有日期和格式">下移</button>
+            <button class="btn" id="review-duplicate-row" type="button" title="复制所选整行，包含隐藏日期、备注和标记">复制整行</button>
+            <button class="btn" id="review-tracking" type="button" disabled title="保留历史；新一轮再次达到2板时自动恢复，也可手动恢复">停止记录</button>
             <button class="btn" id="review-delete-row" type="button">删除行</button>
             <button class="btn" id="review-undo" type="button" disabled>撤销</button>
             <button class="btn" id="review-redo" type="button" disabled>重做</button>
@@ -74,8 +99,10 @@
             <div>
               <button class="btn btn-mini" id="review-hide-date" type="button" disabled>隐藏选中日期</button>
               <button class="btn btn-mini" id="review-restore-dates" type="button" disabled>恢复隐藏日期</button>
-              <label>缩放 <select id="review-zoom" aria-label="表格缩放"><option value="0.75">75%</option><option value="1" selected>100%</option><option value="1.25">125%</option><option value="1.5">150%</option></select></label>
+              <label>缩放 <select id="review-zoom" aria-label="工作区缩放"><option value="0.5">50%</option><option value="0.6">60%</option><option value="0.7">70%</option><option value="0.75">75%</option><option value="0.8">80%</option><option value="0.9">90%</option><option value="1" selected>100%</option><option value="1.1">110%</option><option value="1.2">120%</option><option value="1.25">125%</option><option value="1.3">130%</option><option value="1.4">140%</option><option value="1.5">150%</option><option value="1.6">160%</option><option value="1.7">170%</option><option value="1.8">180%</option><option value="1.9">190%</option><option value="2">200%</option></select></label>
+              <button class="btn btn-mini" id="review-zoom-reset" type="button">恢复100%</button>
             </div>
+          </div>
           </div>
           </div>
         </fieldset>
@@ -83,30 +110,113 @@
         <div class="review-grid-scroll" id="review-scroll" aria-label="复盘日期表格" tabindex="0">
           <table id="review-grid" class="review-grid" role="grid" aria-label="按日期排列的手工复盘表" aria-multiselectable="true"></table>
         </div>
+        <nav class="review-scroll-dock" id="review-scroll-dock" aria-label="横向查看日期">
+          <div class="review-dock-content">
+          <button class="btn" type="button" data-review-scroll="first" aria-label="最早日期">最早</button>
+          <button class="btn" type="button" data-review-scroll="left" aria-label="向左查看日期">←</button>
+          <input id="review-scroll-range" type="range" min="0" max="0" value="0" step="1" aria-label="左右滑动日期">
+          <button class="btn" type="button" data-review-scroll="right" aria-label="向右查看日期">→</button>
+          <button class="btn" type="button" data-review-scroll="last" aria-label="最新日期">最新</button>
+          </div>
+        </nav>
+        <dialog id="review-add-stocks-dialog" class="review-theme-dialog review-add-stocks-dialog" aria-labelledby="review-add-stocks-title">
+          <div class="review-theme-dialog-head"><h2 id="review-add-stocks-title">加入个股</h2><button class="btn" type="button" data-review-dialog-close aria-label="关闭加入个股">关闭</button></div>
+          <div class="review-dialog-body">
+            <div class="review-stock-sources" role="group" aria-label="股票来源">
+              <button class="btn" type="button" data-review-source="watchlist" aria-pressed="true">自选股</button>
+              <button class="btn" type="button" data-review-source="ladder" aria-pressed="false">连板天梯</button>
+              <button class="btn" type="button" data-review-source="search" aria-pressed="false">搜索全部股票</button>
+            </div>
+            <div class="review-manual-fields review-source-filters">
+              <div id="review-add-category-field"><label for="review-add-category">自选分类</label><select id="review-add-category"><option value="all">全部自选</option></select></div>
+              <div id="review-add-ladder-field" hidden><label for="review-add-ladder-date">天梯交易日</label><select id="review-add-ladder-date"></select></div>
+            </div>
+            <form id="review-add-stocks-search">
+              <label for="review-add-stock-query">股票名称或代码</label>
+              <div class="review-stock-search"><input id="review-add-stock-query" maxlength="80" autocomplete="off" placeholder="输入名称或代码筛选"><button class="btn" id="review-add-search-submit" type="submit" hidden>搜索</button></div>
+            </form>
+            <p id="review-add-source-status" role="status" aria-live="polite"></p>
+            <div class="review-stock-sources"><button class="btn" id="review-add-source-retry" type="button" hidden>重新读取来源</button><button class="btn" id="review-add-visible" type="button">勾选当前列表</button></div>
+            <div id="review-add-stock-results" role="group" aria-label="股票搜索结果" aria-live="polite"></div>
+            <div class="review-stock-picked"><span class="review-dialog-label">已选择</span><div id="review-add-stock-selected" role="group" aria-label="待加入的股票">尚未选择股票</div></div>
+            <form id="review-add-stocks-form">
+              <div class="review-manual-fields">
+                <div><label for="review-add-stock-theme">题材</label><input id="review-add-stock-theme" maxlength="2000" list="review-add-stock-themes" placeholder="选择已有题材，或输入新题材"><datalist id="review-add-stock-themes"></datalist></div>
+                <div><label for="review-add-stock-date">加入日期（行情起点）</label><select id="review-add-stock-date" required aria-describedby="review-add-stock-hint"></select></div>
+              </div>
+              <p id="review-add-stock-hint" class="review-dialog-hint">可跨来源勾选多只股票。同一股票可加入多个题材，仅跳过同题材、同加入日期的重复记录。自动补齐加入日期至本地最新收盘日的行情，题材和名称放在前两个交易日；后续收录继续更新。</p>
+              <div class="review-manual-submit"><span id="review-add-stock-status" role="status" aria-live="polite"></span><button class="btn btn-primary" id="review-add-stock-submit" type="submit">加入复盘表</button></div>
+            </form>
+          </div>
+        </dialog>
+        <dialog id="review-new-rows-dialog" class="review-theme-dialog review-small-dialog" aria-labelledby="review-new-rows-title">
+          <form id="review-new-rows-form">
+            <div class="review-theme-dialog-head"><h2 id="review-new-rows-title">新增行</h2><button class="btn" type="button" data-review-dialog-close aria-label="关闭新增行">关闭</button></div>
+            <div class="review-dialog-body">
+              <div class="review-manual-fields">
+                <div><label for="review-new-row-count">新增行数</label><input id="review-new-row-count" type="number" min="1" max="1000" step="1" value="1" required></div>
+                <div><label for="review-new-row-position">插入位置</label><select id="review-new-row-position"><option value="after">选中行下方</option><option value="before">选中行上方</option><option value="theme">当前题材末尾</option><option value="end">表格末尾</option></select></div>
+                <div class="review-manual-theme"><label for="review-new-row-theme">题材</label><input id="review-new-row-theme" maxlength="2000" list="review-new-row-themes" placeholder="默认沿用当前位置题材"><datalist id="review-new-row-themes"></datalist></div>
+              </div>
+              <p class="review-dialog-hint">可一次新增多行，默认沿用当前位置题材。已有题材会自动归组，位置用于题材内定位；新题材默认放在表尾。</p>
+              <p id="review-new-rows-status" role="alert"></p>
+            </div>
+            <div class="review-theme-dialog-foot"><button class="btn" type="button" data-review-dialog-close>取消</button><button class="btn btn-primary" type="submit">新增并编辑</button></div>
+          </form>
+        </dialog>
+        <dialog id="review-theme-edit-dialog" class="review-theme-dialog review-small-dialog" aria-labelledby="review-theme-edit-title">
+          <form id="review-theme-edit-form">
+            <div class="review-theme-dialog-head"><h2 id="review-theme-edit-title">编辑个股题材</h2><button class="btn" type="button" data-review-dialog-close aria-label="关闭题材编辑">关闭</button></div>
+            <div class="review-dialog-body"><p id="review-theme-edit-note"></p><label for="review-theme-value">题材名称</label><input id="review-theme-value" list="review-theme-options" maxlength="2000" required placeholder="选择已有题材，或输入新题材"><datalist id="review-theme-options"></datalist><p>仅修改所选记录，保留其他历史记录的分类。相同题材名称自动合并归组。</p></div>
+            <div class="review-theme-dialog-foot"><button class="btn" type="button" data-review-dialog-close>取消</button><button class="btn btn-primary" type="submit">保存并归组</button></div>
+          </form>
+        </dialog>
+        <dialog id="review-stock-dialog" class="review-theme-dialog review-small-dialog" aria-labelledby="review-stock-title">
+          <div class="review-theme-dialog-head"><h2 id="review-stock-title">关联股票查看K线</h2><button class="btn" type="button" data-review-dialog-close aria-label="关闭股票搜索">关闭</button></div>
+          <div class="review-dialog-body"><form id="review-stock-form"><label for="review-stock-query">股票名称或代码</label><div class="review-stock-search"><input id="review-stock-query" maxlength="80" required autocomplete="off"><button class="btn" type="submit">搜索</button></div></form><div id="review-stock-results" role="status" aria-live="polite"></div></div>
+        </dialog>
+        <dialog id="review-theme-dialog" class="review-theme-dialog" aria-labelledby="review-theme-title">
+          <div class="review-theme-dialog-head">
+            <div><h2 id="review-theme-title">题材排序</h2><p>拖动左侧手柄，或直接填写目标名次；同题材股票一起移动。</p></div>
+            <button class="btn" type="button" data-theme-close aria-label="关闭题材排序" title="关闭（Esc）">× 关闭</button>
+          </div>
+          <div class="review-theme-search"><label for="review-theme-search">查找题材</label><input id="review-theme-search" type="search" placeholder="输入题材名称" autocomplete="off"><span id="review-theme-matches"></span></div>
+          <div id="review-theme-list" class="review-theme-list" aria-label="题材顺序"></div>
+          <div class="review-theme-dialog-foot">
+            <div><output id="review-theme-status" aria-live="polite">调整后自动保存，可撤销。</output><span id="review-theme-save-state" class="review-save-state"></span></div>
+            <div><button class="btn" id="review-theme-undo" type="button" disabled>撤销</button><button class="btn" id="review-theme-redo" type="button" disabled>重做</button><button class="btn btn-primary" type="button" data-theme-close>完成</button></div>
+          </div>
+        </dialog>
         <div id="review-cell-menu" class="review-cell-menu" role="menu" aria-label="单元格快捷操作" hidden>
           <button type="button" role="menuitem" tabindex="-1" data-review-action="edit">编辑内容 <kbd>F2</kbd></button>
+          <button type="button" role="menuitem" tabindex="-1" data-review-action="theme">编辑个股题材</button>
           <button type="button" role="menuitem" tabindex="-1" data-review-action="yellow">黄字</button>
           <button type="button" role="menuitem" tabindex="-1" data-review-action="leader">设为龙头</button>
           <button type="button" role="menuitem" tabindex="-1" data-review-action="clear">清空内容 <kbd>Delete</kbd></button>
           <hr role="separator">
           <button type="button" role="menuitem" tabindex="-1" data-review-action="copy">复制 <kbd>Ctrl+C</kbd></button>
+          <button type="button" role="menuitem" tabindex="-1" data-review-action="duplicate-row">复制整行</button>
           <button type="button" role="menuitem" tabindex="-1" data-review-action="paste">粘贴 <kbd>Ctrl+V</kbd></button>
           <hr role="separator">
           <button type="button" role="menuitem" tabindex="-1" data-review-action="insert-row">下方插入行</button>
           <button type="button" role="menuitem" tabindex="-1" data-review-action="move-up">整行上移</button>
           <button type="button" role="menuitem" tabindex="-1" data-review-action="move-down">整行下移</button>
+          <button type="button" role="menuitem" tabindex="-1" data-review-action="tracking">停止记录</button>
           <button class="review-menu-danger" type="button" role="menuitem" tabindex="-1" data-review-action="delete-row">删除整行</button>
         </div>
       </section>
       <div class="review-help">
-        <p>单击选格，双击或 F2 编辑；选格后直接输入可替换内容。方向键换格，拖动鼠标或 Shift＋点击框选，右键打开快捷操作。点击左侧股票可选择该行可见格。</p>
+        <p>单击选格，双击或 F2 编辑；选格后直接输入可替换内容。方向键换格，拖动鼠标或 Shift＋点击框选，右键打开快捷操作。点击左侧股票名称查看K线，点击行号选择该行；左侧勾选可多选不相邻的行，Shift＋点击行号连续多选。编辑题材后自动归组；删除行后自动上移并清理多余空行。缩放比例会在当前浏览器记住。</p>
         <p>Enter / Tab 换格，Alt＋Enter 换行，Esc 取消正在编辑的内容；Ctrl＋Z 撤销，Ctrl＋S 保存。支持从 Excel 复制粘贴多格；龙头标记和整行移动包含隐藏日期。</p>
+        <p>「加入个股」可从自选、连板天梯或搜索中勾选多只，统一设置题材并自动补齐本地行情。「复制整行」保留全部日期、备注和标记，复制后可单独修改题材；Ctrl＋C 仍复制选区。停止或恢复记录按股票代码作用于该股的全部历史记录。</p>
+        <p>按日期顺序收录，已录日期可以重复更新。仅新增沪深主板非ST的2板及以上股票；行情格默认只填当日收盘相对昨收的涨跌幅，涨停格也一样。手工描述、黄字和龙头标记保留。选中自动收录的股票后可停止或恢复记录；停止后新一轮再达2板会自动恢复。</p>
         <span id="review-calendar-note"></span>
       </div>
       <button class="btn" id="review-reload" type="button">重新读取已保存版本</button>
     </main>
   </div>
   <script src="/static/shared.js?v=__ASSET_VERSION__"></script>
+  <script src="/static/chart.js?v=__ASSET_VERSION__"></script>
   <script src="/static/review.js?v=__ASSET_VERSION__"></script>
 </body>
 </html>

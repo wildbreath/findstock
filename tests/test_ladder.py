@@ -131,7 +131,7 @@ def test_ladder_api_and_error_contract(container, service):
     app = create_app()
     container.ladder_service = service
     app.dependency_overrides[get_container] = lambda: container
-    client = TestClient(app)
+    client = TestClient(app, client=("127.0.0.1", 50000))
     response = client.get("/api/stock-ladder?date=2026-10-14")
     assert response.status_code == 200
     assert response.json()["trade_date"] == "2026-10-14"
@@ -279,7 +279,7 @@ def test_archive_api_refresh_and_fallback(container, service):
     app = create_app()
     container.ladder_service = service
     app.dependency_overrides[get_container] = lambda: container
-    client = TestClient(app)
+    client = TestClient(app, client=("127.0.0.1", 50000))
     url = "/api/stock-ladder?date=2026-10-14"
     first = client.get(url).json()
     assert first["data_source"] == "local" and first["is_final"]
@@ -351,7 +351,7 @@ def test_sector_candidates_api_reports_partial_archive_coverage(container, servi
     app = create_app()
     container.ladder_service = service
     app.dependency_overrides[get_container] = lambda: container
-    body = TestClient(app).get("/api/stock-ladder/sector-candidates").json()
+    body = TestClient(app, client=("127.0.0.1", 50000)).get("/api/stock-ladder/sector-candidates").json()
     assert body["trading_days"] == ["2026-10-14", "2026-10-15"]
     assert body["covered_dates"] == ["2026-10-14"]
     assert body["codes"] == ["sh.600002", "sz.000002"]
@@ -588,7 +588,7 @@ def test_wudao_theme_candidates_api_uses_date_parameter_and_local_all_height_cou
     container.ladder_service = service
     app.dependency_overrides[get_container] = lambda: container
     block_all_provider_calls(service)
-    client = TestClient(app)
+    client = TestClient(app, client=("127.0.0.1", 50000))
     body = client.get("/api/stock-ladder/theme-candidates?date=2026-10-14").json()
     assert body["trade_date"] == "2026-10-14"
     assert body["covered_dates"] == body["classified_dates"] == ["2026-10-14"]

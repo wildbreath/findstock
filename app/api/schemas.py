@@ -19,6 +19,17 @@ class ReviewCell(BaseModel):
     bold: bool = False
     kind: Literal["", "theme", "stock"] = ""
     highlight: bool = False
+    auto_text: str = Field(default="", max_length=2000)
+
+
+class ReviewTracking(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    code: str = Field(pattern=r"^(sh\.(60|68)\d{4}|sz\.(00|30)\d{4})$")
+    theme: str = Field(min_length=1, max_length=2000)
+    entry_date: date
+    stopped: bool = False
+    stopped_after: date | None = None
 
 
 class ReviewRow(BaseModel):
@@ -27,6 +38,15 @@ class ReviewRow(BaseModel):
     id: str = Field(pattern=r"^[a-zA-Z0-9_-]{1,64}$")
     cells: dict[date, ReviewCell] = Field(default_factory=dict, max_length=1500)
     leader: bool = False
+    tracking: ReviewTracking | None = None
+    theme: str = Field(default="", max_length=2000)
+    stock_code: str = Field(default="", pattern=r"^$|^(sh|sz)\.\d{6}$")
+
+    @model_validator(mode="after")
+    def valid_stock_binding(self) -> ReviewRow:
+        if self.stock_code and self.tracking and self.stock_code != self.tracking.code:
+            raise ValueError("股票关联代码与跟踪代码必须一致")
+        return self
 
 
 class ReviewSheet(BaseModel):
@@ -36,6 +56,7 @@ class ReviewSheet(BaseModel):
     dates: list[date] = Field(default_factory=list, max_length=1500)
     hidden_dates: list[date] = Field(default_factory=list, max_length=1500)
     rows: list[ReviewRow] = Field(default_factory=list, max_length=1000)
+    collected_dates: list[date] = Field(default_factory=list, max_length=1500)
 
     @model_validator(mode="after")
     def valid_grid(self) -> ReviewSheet:
@@ -44,13 +65,40 @@ class ReviewSheet(BaseModel):
             raise ValueError("日期和行编号不能重复")
         if not set(self.hidden_dates) <= dates or any(not row.cells.keys() <= dates for row in self.rows):
             raise ValueError("单元格和隐藏列必须属于表格日期")
+        if not set(self.collected_dates) <= dates or any(
+            row.tracking and row.tracking.entry_date not in dates for row in self.rows
+        ):
+            raise ValueError("收录日及跟踪起点必须属于表格日期")
         if sum(len(row.cells) for row in self.rows) > 50000:
             raise ValueError("单元格数量过多, 请分段整理复盘")
         if sum(len(cell.text) for row in self.rows for cell in row.cells.values()) > 2000000:
             raise ValueError("复盘文字总量过大")
         self.dates = sorted(self.dates)
         self.hidden_dates = sorted(set(self.hidden_dates))
+        self.collected_dates = sorted(set(self.collected_dates))
         return self
+
+
+class ReviewCollectRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    trade_date: date
+    revision: StrictInt = Field(ge=0)
+
+
+class ReviewStockChoice(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    code: str = Field(pattern=r"^(sh\.(60|68)\d{4}|sz\.(00|30)\d{4})$")
+    name: str = Field(min_length=1, max_length=2000)
+
+
+class ReviewAddStocksRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    stocks: list[ReviewStockChoice] = Field(min_length=1, max_length=1000)
+    theme: str = Field(min_length=1, max_length=2000)
+    trade_date: date
 
 
 class ErrorDetail(BaseModel):
@@ -242,7 +290,7 @@ class MonthScanRequest(BaseModel):
 
     month: str = Field(pattern=r"^\d{4}-\d{2}$", description="月份, 例如 2026-09")
     params: ScreenParams | None = None
-    conditions: list[StrategyConditionIn] | None = None
+    conditions: list[StrategyConditionIn] | None = Field(default=None, max_length=100)
     strategy_id: int | None = None
 
 
@@ -417,7 +465,7 @@ class ScreenRequest(BaseModel):
         default=None, description="标准规则参数 (旧接口), 省略时用 conditions / 默认策略"
     )
     conditions: list[StrategyConditionIn] | None = Field(
-        default=None, description="模块化筛选条件列表 (按顺序全部满足)"
+        default=None, max_length=100, description="模块化筛选条件列表 (按顺序全部满足)"
     )
     strategy_id: int | None = Field(
         default=None, description="使用保存好的策略 (与 conditions 二选一)"
@@ -456,7 +504,7 @@ class StrategySaveRequest(BaseModel):
 
     name: str = Field(min_length=1, max_length=30, description="策略名称")
     conditions: list[StrategyConditionIn] = Field(
-        default_factory=list, description="条件列表 (按顺序逐条收窄)"
+        default_factory=list, max_length=100, description="条件列表 (按顺序逐条收窄)"
     )
 
 
@@ -484,7 +532,9 @@ class ScreenResponse(BaseModel):
     warnings: list[str]
     generated_at: datetime | None
     criteria: dict[str, str]
-    params: ScreenParams
+    params: ScreenParams | None = Field(
+        description="等价的标准参数；无法表达自定义策略时为 null，以 strategy 为准"
+    )
     strategy: StrategyOut
     message: str | None = None
 

@@ -67,7 +67,7 @@ function queueStockSectors(code, refresh = false, priority = false) {
     if (index > 0) stockSectorQueue.unshift(...stockSectorQueue.splice(index, 1));
   }
   if (state?.loading || (!refresh && state && (state.error || state.profile?.stale || !state.profile ||
-      Date.now() - Date.parse(state.profile.fetched_at) < 86400000))) return;
+      Date.now() - (state.checkedAt || Date.parse(state.profile.fetched_at)) < 86400000))) return;
   stockSectorCache.set(code, {...state, loading: true, error: ""});
   updateStockSectorNodes(code);
   if (priority) stockSectorQueue.unshift({code, refresh});
@@ -80,7 +80,7 @@ function drainStockSectors() {
     const {code, refresh} = stockSectorQueue.shift();
     stockSectorActive++;
     api(`/api/stocks/${encodeURIComponent(code)}/sectors${refresh ? "?refresh=true" : ""}`)
-      .then((profile) => stockSectorCache.set(code, {profile, loading: false}))
+      .then((profile) => stockSectorCache.set(code, {profile, loading: false, checkedAt: Date.now()}))
       .catch((error) => stockSectorCache.set(code, {
         ...stockSectorCache.get(code), loading: false, error: error.message,
       }))

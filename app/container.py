@@ -25,6 +25,7 @@ from app.services.calendar_service import TradingCalendarService
 from app.services.data_sync_service import DataSyncService
 from app.services.ladder_service import LadderService
 from app.services.name_history_service import NameHistoryService
+from app.services.review_collection_service import ReviewCollectionService
 from app.services.screener_service import ScreenerService
 from app.services.stock_chart_service import StockChartService
 from app.services.stock_sector_service import StockSectorService
@@ -84,6 +85,10 @@ class Container:
         return StrategyRepository(self.database)
 
     # --- 服务 -------------------------------------------------------------
+
+    @cached_property
+    def review_collection_service(self) -> ReviewCollectionService:
+        return ReviewCollectionService(self.database)
 
     @cached_property
     def ladder_service(self) -> LadderService:
